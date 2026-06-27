@@ -206,6 +206,16 @@
 
     <string name="tethering_static_ip">Static IP</string>
     <string name="tethering_static_ip_help">Enter one IPv4 or IPv6 address per line. Add /prefix when needed, for example 10.0.0.1/24 or fd00::1/64. Without /prefix, the address is added as a single host.</string>
+    <string name="tethering_downstream_ip_wifi">Wi‑Fi hotspot IP</string>
+    <string name="tethering_downstream_ip_usb">USB tethering IP</string>
+    <string name="tethering_downstream_ip_interface">Interface</string>
+    <string name="tethering_downstream_ip_addresses">IPv4 address</string>
+    <string name="tethering_downstream_ip_summary">%1$s\n%2$s</string>
+    <string name="tethering_downstream_ip_help">Applies IPv4 addresses directly to the downstream interface through root. Existing IPv6 addresses are preserved. DHCP leases may still require reconnecting clients or restarting tethering.</string>
+    <string name="tethering_downstream_ip_applied">Applied %1$s to %2$s</string>
+    <string name="tethering_downstream_ip_error_interface">Interface name is required.</string>
+    <string name="tethering_downstream_ip_error_no_address">At least one IPv4 address is required.</string>
+    <string name="tethering_downstream_ip_error_ipv4_only">Only IPv4 addresses are supported here.</string>
 
     <string name="connected_state_incomplete">" (connecting)"</string>
     <string name="connected_state_valid">" (reachable)"</string>

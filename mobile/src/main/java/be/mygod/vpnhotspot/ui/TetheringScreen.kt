@@ -59,8 +59,10 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -73,6 +75,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import be.mygod.vpnhotspot.App.Companion.app
+import be.mygod.vpnhotspot.DownstreamIpSetter
 import be.mygod.vpnhotspot.LocalOnlyHotspotService
 import be.mygod.vpnhotspot.R
 import be.mygod.vpnhotspot.RepeaterService
@@ -141,6 +144,7 @@ fun TetheringScreen(
     ) {
         TextFieldState(staticIpDraft.orEmpty())
     }
+    var downstreamIpDialog by remember { mutableStateOf<DownstreamIpDialog?>(null) }
     var wpsDialog by rememberSaveable { mutableStateOf(false) }
     var wpsPin by rememberTextFieldValueAtEnd("", wpsDialog)
     val tetherTypeVersion by if (inspectionMode) remember { mutableIntStateOf(0) } else rememberTetherTypeVersion()
@@ -165,6 +169,21 @@ fun TetheringScreen(
     }
     val interfaceIfaces = remember(tetherStates, monitored) {
         (tetherStates.tethered + monitored).toSortedSet().toList()
+    }
+    val wifiDownstreamIface = remember(tetherStates.tethered, interfaceRefreshVersion) {
+        val iface = tetherStates.tethered.firstOrNull {
+            when (TetherType.ofInterface(it)) {
+                TetherType.WIFI, TetherType.WIGIG -> true
+                else -> false
+            }
+        }
+        DownstreamIpSetter.iface(DownstreamIpSetter.KIND_WIFI, iface ?: DownstreamIpSetter.DEFAULT_WIFI_INTERFACE)
+    }
+    val usbDownstreamIface = remember(tetherStates.tethered, interfaceRefreshVersion) {
+        val iface = tetherStates.tethered.firstOrNull {
+            TetherType.ofInterface(it).isA(TetherType.USB)
+        }
+        DownstreamIpSetter.iface(DownstreamIpSetter.KIND_USB, iface ?: DownstreamIpSetter.DEFAULT_USB_INTERFACE)
     }
     val wifiBaseError = tetherError(context, tetherStates, TetherType.WIFI)
     val wifiSummary by if (inspectionMode) {
@@ -386,6 +405,24 @@ fun TetheringScreen(
                         onConfigure = onConfigureAp,
                     )
                 }
+                row(R.string.tethering_downstream_ip_wifi) {
+                    DownstreamIpRow(
+                        title = stringResource(R.string.tethering_downstream_ip_wifi),
+                        iface = wifiDownstreamIface,
+                        address = DownstreamIpSetter.addresses(
+                            wifiDownstreamIface,
+                            DownstreamIpSetter.DEFAULT_WIFI_ADDRESS,
+                        ),
+                        onClick = {
+                            downstreamIpDialog = DownstreamIpDialog(
+                                kind = DownstreamIpSetter.KIND_WIFI,
+                                title = context.getString(R.string.tethering_downstream_ip_wifi),
+                                iface = wifiDownstreamIface,
+                                defaultAddress = DownstreamIpSetter.DEFAULT_WIFI_ADDRESS,
+                            )
+                        },
+                    )
+                }
                 row(R.string.tethering_manage_usb) {
                     TetheringTypeRow(
                         icon = R.drawable.ic_usb,
@@ -394,6 +431,24 @@ fun TetheringScreen(
                         summary = tetherError(context, tetherStates, TetherType.USB),
                         tetheringType = TetheringManagerCompat.TETHERING_USB,
                         snackbarHostState = snackbarHostState,
+                    )
+                }
+                row(R.string.tethering_downstream_ip_usb) {
+                    DownstreamIpRow(
+                        title = stringResource(R.string.tethering_downstream_ip_usb),
+                        iface = usbDownstreamIface,
+                        address = DownstreamIpSetter.addresses(
+                            usbDownstreamIface,
+                            DownstreamIpSetter.DEFAULT_USB_ADDRESS,
+                        ),
+                        onClick = {
+                            downstreamIpDialog = DownstreamIpDialog(
+                                kind = DownstreamIpSetter.KIND_USB,
+                                title = context.getString(R.string.tethering_downstream_ip_usb),
+                                iface = usbDownstreamIface,
+                                defaultAddress = DownstreamIpSetter.DEFAULT_USB_ADDRESS,
+                            )
+                        },
                     )
                 }
                 if (showBluetooth) {
@@ -427,6 +482,109 @@ fun TetheringScreen(
                 }
             }
         }
+    }
+
+    downstreamIpDialog?.let { dialog ->
+        val focusRequester = rememberDialogFocusRequester()
+        var ifaceDraft by remember(dialog) {
+            mutableStateOf(TextFieldValue(dialog.iface, TextRange(dialog.iface.length)))
+        }
+        val initialAddress = remember(dialog) {
+            DownstreamIpSetter.addresses(dialog.iface, dialog.defaultAddress)
+        }
+        var addressDraft by remember(dialog) {
+            mutableStateOf(TextFieldValue(initialAddress, TextRange(initialAddress.length)))
+        }
+        val iface = ifaceDraft.text.trim()
+        val addressValue = addressDraft.text.trim()
+        val downstreamIpDraftError = try {
+            if (iface.isEmpty()) stringResource(R.string.tethering_downstream_ip_error_interface) else {
+                DownstreamIpSetter.parseIpv4Addresses(addressValue)
+                null
+            }
+        } catch (e: IllegalArgumentException) {
+            e.readableMessage
+        } catch (e: Exception) {
+            e.readableMessage
+        }
+        AlertDialog(
+            onDismissRequest = { downstreamIpDialog = null },
+            title = { Text(dialog.title) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Text(
+                        text = stringResource(R.string.tethering_downstream_ip_help),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    OutlinedTextField(
+                        value = ifaceDraft,
+                        onValueChange = { ifaceDraft = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(focusRequester)
+                            .semantics { contentDescription = context.getString(R.string.tethering_downstream_ip_interface) },
+                        label = { Text(stringResource(R.string.tethering_downstream_ip_interface)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        singleLine = true,
+                        shape = OutlinedTextFieldDefaults.roundedShape,
+                        colors = OutlinedTextFieldDefaults.tonalColors(),
+                    )
+                    OutlinedTextField(
+                        value = addressDraft,
+                        onValueChange = { addressDraft = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics { contentDescription = context.getString(R.string.tethering_downstream_ip_addresses) },
+                        label = { Text(stringResource(R.string.tethering_downstream_ip_addresses)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        isError = downstreamIpDraftError != null,
+                        singleLine = true,
+                        shape = OutlinedTextFieldDefaults.roundedShape,
+                        colors = OutlinedTextFieldDefaults.tonalColors(),
+                        supportingText = downstreamIpDraftError?.let {
+                            {
+                                Text(
+                                    text = it,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.semantics {
+                                        liveRegion = LiveRegionMode.Polite
+                                        error(it)
+                                    },
+                                )
+                            }
+                        },
+                    )
+                }
+            },
+            confirmButton = {
+                DialogConfirmButton(
+                    enabled = downstreamIpDraftError == null,
+                    onClick = {
+                        downstreamIpDialog = null
+                        scope.launch {
+                            try {
+                                DownstreamIpSetter.apply(dialog.kind, iface, addressValue)
+                                onRefresh()
+                                snackbarHostState.showLongSnackbar(
+                                    context.getString(R.string.tethering_downstream_ip_applied, addressValue, iface),
+                                )
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (e: Exception) {
+                                snackbarHostState.showLongSnackbar(e.readableMessage)
+                            }
+                        }
+                    },
+                ) {
+                    Text(stringResource(android.R.string.ok))
+                }
+            },
+            dismissButton = {
+                DialogDismissButton(onClick = { downstreamIpDialog = null }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
+            },
+        )
     }
 
     if (staticIpDraft != null) {
@@ -547,6 +705,29 @@ fun TetheringScreen(
             },
         )
     }
+}
+
+private data class DownstreamIpDialog(
+    val kind: String,
+    val title: String,
+    val iface: String,
+    val defaultAddress: String,
+)
+
+@Composable
+private fun DownstreamIpRow(
+    title: String,
+    iface: String,
+    address: String,
+    onClick: () -> Unit,
+) {
+    PreferenceRow(
+        modifier = Modifier.padding(start = 48.dp),
+        icon = R.drawable.ic_push_pin,
+        title = title,
+        summary = stringResource(R.string.tethering_downstream_ip_summary, iface, address),
+        onClick = onClick,
+    )
 }
 
 @Composable

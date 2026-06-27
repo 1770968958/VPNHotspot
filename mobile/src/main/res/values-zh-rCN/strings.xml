@@ -176,6 +176,16 @@
   <string name="softap_disconnect_reason_mesh_channel_switch_unspecified">未指定原因的 mesh 信道切换</string>
   <string name="tethering_static_ip">静态 IP</string>
   <string name="tethering_static_ip_help">每行输入一个 IPv4 或 IPv6 地址。需要时添加 /prefix，例如 10.0.0.1/24 或 fd00::1/64。没有 /prefix 时，该地址会作为单个 host 添加。</string>
+  <string name="tethering_downstream_ip_wifi">WLAN 热点 IP</string>
+  <string name="tethering_downstream_ip_usb">USB 网络共享 IP</string>
+  <string name="tethering_downstream_ip_interface">接口</string>
+  <string name="tethering_downstream_ip_addresses">IPv4 地址</string>
+  <string name="tethering_downstream_ip_summary">%1$s\n%2$s</string>
+  <string name="tethering_downstream_ip_help">通过 root 直接把 IPv4 地址应用到下游接口。现有 IPv6 地址会保留。DHCP 租约可能仍需要客户端重连或重启网络共享。</string>
+  <string name="tethering_downstream_ip_applied">已将 %1$s 应用到 %2$s</string>
+  <string name="tethering_downstream_ip_error_interface">需要填写接口名。</string>
+  <string name="tethering_downstream_ip_error_no_address">至少需要一个 IPv4 地址。</string>
+  <string name="tethering_downstream_ip_error_ipv4_only">这里仅支持 IPv4 地址。</string>
   <string name="connected_state_incomplete">（正在连接）</string>
   <string name="connected_state_valid">（已连接）</string>
   <string name="connected_state_failed">（已断开）</string>
