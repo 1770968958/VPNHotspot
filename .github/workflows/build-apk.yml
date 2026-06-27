@@ -49,6 +49,42 @@ jobs:
             ./gradlew :mobile:assembleDebug --no-daemon
           fi
 
+      - name: Generate test signing key
+        if: ${{ inputs.variant == 'release' }}
+        run: |
+          keytool -genkeypair \
+            -keystore "$RUNNER_TEMP/test-release.keystore" \
+            -storepass android \
+            -keypass android \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Sign release APKs
+        if: ${{ inputs.variant == 'release' }}
+        run: |
+          BUILD_TOOLS="$(ls -d "$ANDROID_HOME/build-tools/"* | sort -V | tail -n 1)"
+          mkdir -p mobile/build/outputs/apk/release-signed
+
+          for apk in mobile/build/outputs/apk/release/*-unsigned.apk; do
+            name="$(basename "$apk" -unsigned.apk)"
+            aligned="mobile/build/outputs/apk/release-signed/${name}-aligned.apk"
+            signed="mobile/build/outputs/apk/release-signed/${name}-signed.apk"
+
+            "$BUILD_TOOLS/zipalign" -f -p 4 "$apk" "$aligned"
+            "$BUILD_TOOLS/apksigner" sign \
+              --ks "$RUNNER_TEMP/test-release.keystore" \
+              --ks-key-alias androiddebugkey \
+              --ks-pass pass:android \
+              --key-pass pass:android \
+              --out "$signed" \
+              "$aligned"
+            "$BUILD_TOOLS/apksigner" verify "$signed"
+            rm "$aligned"
+          done
+
       - name: Upload debug APKs
         if: ${{ inputs.variant == 'debug' }}
         uses: actions/upload-artifact@v5
@@ -56,12 +92,19 @@ jobs:
           name: vpnhotspot-debug-apks
           path: mobile/build/outputs/apk/debug/*.apk
 
-      - name: Upload release APKs
+      - name: Upload signed release APKs
         if: ${{ inputs.variant == 'release' }}
         uses: actions/upload-artifact@v5
         with:
-          name: vpnhotspot-release-apks
-          path: mobile/build/outputs/apk/release/*.apk
+          name: vpnhotspot-release-signed-apks
+          path: mobile/build/outputs/apk/release-signed/*-signed.apk
+
+      - name: Upload unsigned release APKs
+        if: ${{ inputs.variant == 'release' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: vpnhotspot-release-unsigned-apks
+          path: mobile/build/outputs/apk/release/*-unsigned.apk
 
       - name: Upload release mapping
         if: ${{ inputs.variant == 'release' }}
