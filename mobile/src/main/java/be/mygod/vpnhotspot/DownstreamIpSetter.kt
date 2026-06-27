@@ -57,6 +57,7 @@ object DownstreamIpSetter {
         val requested = parseIpv4Addresses(value.trim())
         val preservedIpv6 = currentIpv6Addresses(normalizedDev)
         DaemonController.replaceStaticAddresses(normalizedDev, requested + preservedIpv6)
+        DaemonController.runDhcpServer(normalizedDev, requested.first())
         app.pref.edit {
             putString(KEY_IFACE + kind, normalizedDev)
             putString(KEY_ADDRESS + normalizedDev, value.trim())

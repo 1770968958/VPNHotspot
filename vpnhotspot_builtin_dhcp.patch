@@ -1,0 +1,143 @@
+diff --git a/mobile/src/main/java/be/mygod/vpnhotspot/DownstreamIpSetter.kt b/mobile/src/main/java/be/mygod/vpnhotspot/DownstreamIpSetter.kt
+index 0fe4d55c..a7e08aad 100644
+--- a/mobile/src/main/java/be/mygod/vpnhotspot/DownstreamIpSetter.kt
++++ b/mobile/src/main/java/be/mygod/vpnhotspot/DownstreamIpSetter.kt
+@@ -57,6 +57,7 @@ object DownstreamIpSetter {
+         val requested = parseIpv4Addresses(value.trim())
+         val preservedIpv6 = currentIpv6Addresses(normalizedDev)
+         DaemonController.replaceStaticAddresses(normalizedDev, requested + preservedIpv6)
++        DaemonController.runDhcpServer(normalizedDev, requested.first())
+         app.pref.edit {
+             putString(KEY_IFACE + kind, normalizedDev)
+             putString(KEY_ADDRESS + normalizedDev, value.trim())
+diff --git a/mobile/src/main/java/be/mygod/vpnhotspot/root/daemon/DaemonController.kt b/mobile/src/main/java/be/mygod/vpnhotspot/root/daemon/DaemonController.kt
+index 14f41656..7ba38cba 100644
+--- a/mobile/src/main/java/be/mygod/vpnhotspot/root/daemon/DaemonController.kt
++++ b/mobile/src/main/java/be/mygod/vpnhotspot/root/daemon/DaemonController.kt
+@@ -121,6 +121,18 @@ object DaemonController {
+         ))).requireAck()
+     }
+ 
++    suspend fun runDhcpServer(dev: String, server: LinkAddress) {
++        request(ClientEnvelope(run_dhcp_server = RunDhcpServerCommand(
++            dev = dev,
++            server = IpAddressEntry(server.address.address.toByteString(), server.prefixLength),
++            lease_seconds = 3600U,
++        ))).requireAck()
++    }
++
++    suspend fun stopDhcpServer(dev: String) {
++        request(ClientEnvelope(stop_dhcp_server = StopDhcpServerCommand(dev = dev))).requireAck()
++    }
++
+     suspend fun cleanRouting(ipv6NatPrefixSeed: String) {
+         request(ClientEnvelope(clean_routing = CleanRoutingCommand(ipv6NatPrefixSeed))).requireAck()
+     }
+diff --git a/mobile/src/main/proto/daemon.proto b/mobile/src/main/proto/daemon.proto
+index d144cc4c..182adc78 100644
+--- a/mobile/src/main/proto/daemon.proto
++++ b/mobile/src/main/proto/daemon.proto
+@@ -16,6 +16,8 @@ message ClientEnvelope {
+     StartNeighbourMonitorCommand start_neighbour_monitor = 6;
+     CleanRoutingCommand clean_routing = 7;
+     ReplaceStaticAddressesCommand replace_static_addresses = 8;
++    RunDhcpServerCommand run_dhcp_server = 9;
++    StopDhcpServerCommand stop_dhcp_server = 10;
+   }
+ }
+ 
+@@ -43,6 +45,16 @@ message ReplaceStaticAddressesCommand {
+   repeated IpAddressEntry addresses = 2;
+ }
+ 
++message RunDhcpServerCommand {
++  string dev = 1;
++  IpAddressEntry server = 2;
++  uint32 lease_seconds = 3;
++}
++
++message StopDhcpServerCommand {
++  string dev = 1;
++}
++
+ message SessionConfig {
+   string downstream = 1;
+   bool ip_forward = 2;
+diff --git a/mobile/src/main/rust/vpnhotspotd/src/control.rs b/mobile/src/main/rust/vpnhotspotd/src/control.rs
+index 5ef84570..751a5e9d 100644
+--- a/mobile/src/main/rust/vpnhotspotd/src/control.rs
++++ b/mobile/src/main/rust/vpnhotspotd/src/control.rs
+@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
+ use crate::neighbour::Monitor;
+ use crate::report::{ControllerSender, ControllerSenderExt};
+ use crate::session::Session;
+-use crate::{ipsec, nat66, netlink, report, routing};
++use crate::{dhcp, ipsec, nat66, netlink, report, routing};
+ use vpnhotspotd::shared::ipsec::{IpSecForwardPolicyTarget, UpstreamTracker};
+ use vpnhotspotd::shared::proto::daemon;
+ use vpnhotspotd::shared::protocol::{
+@@ -42,6 +42,7 @@ pub(crate) async fn run(socket_name: String) -> io::Result<()> {
+         sessions: Mutex::new(HashMap::new()),
+         ipv6_nat_firewall_base: Mutex::new(false),
+         neighbour_monitor: Mutex::new(None),
++        dhcp_servers: Mutex::new(HashMap::new()),
+     });
+     let active_calls: Arc<Mutex<HashMap<u64, Arc<CallState>>>> =
+         Arc::new(Mutex::new(HashMap::new()));
+@@ -155,6 +156,7 @@ struct State {
+     sessions: Mutex<HashMap<u64, Arc<SessionState>>>,
+     ipv6_nat_firewall_base: Mutex<bool>,
+     neighbour_monitor: Mutex<Option<MonitorState>>,
++    dhcp_servers: Mutex<HashMap<String, dhcp::ServerState>>,
+ }
+ 
+ struct SessionState {
+@@ -187,6 +189,10 @@ impl State {
+         if let Some(monitor) = self.neighbour_monitor.lock().await.take() {
+             monitor.monitor.stop().await;
+         }
++        let dhcp_servers = self.dhcp_servers.lock().await.drain().map(|(_, server)| server).collect::<Vec<_>>();
++        for server in dhcp_servers {
++            server.stop().await;
++        }
+         let sessions = self.drain_sessions().await;
+         stop_sessions(&sessions, withdraw_cleanup).await;
+         self.ipsec.lock().await.clear();
+@@ -373,6 +379,25 @@ async fn handle_command(
+                 )?;
+             Ok(CallOutput::Reply(ack_reply_frame(id)))
+         }
++        daemon::client_envelope::Command::RunDhcpServer(command) => {
++            let dev = command.dev.clone();
++            if let Some(server) = state.dhcp_servers.lock().await.remove(&dev) {
++                server.stop().await;
++            }
++            let server = dhcp::start(command)
++                .await
++                .with_report_context_details("control.run_dhcp_server", [("dev", dev.as_str())])?;
++            state.dhcp_servers.lock().await.insert(dev, server);
++            Ok(CallOutput::Reply(ack_reply_frame(id)))
++        }
++        daemon::client_envelope::Command::StopDhcpServer(command) => {
++            if let Some(server) = state.dhcp_servers.lock().await.remove(&command.dev) {
++                server.stop().await;
++            } else {
++                dhcp::stop(&command.dev).await;
++            }
++            Ok(CallOutput::Reply(ack_reply_frame(id)))
++        }
+         daemon::client_envelope::Command::CleanRouting(command) => {
+             let sessions = state.drain_sessions().await;
+             let mut complete_ids = Vec::new();
+diff --git a/mobile/src/main/rust/vpnhotspotd/src/main.rs b/mobile/src/main/rust/vpnhotspotd/src/main.rs
+index 44d7bc3b..8f30a368 100644
+--- a/mobile/src/main/rust/vpnhotspotd/src/main.rs
++++ b/mobile/src/main/rust/vpnhotspotd/src/main.rs
+@@ -1,6 +1,7 @@
+ mod control;
+ mod dns;
+ mod downstream;
++mod dhcp;
+ mod firewall;
+ mod ipsec;
+ mod nat66;
