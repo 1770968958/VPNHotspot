@@ -497,8 +497,9 @@ fun TetheringScreen(
         }
         val iface = ifaceDraft.text.trim()
         val addressValue = addressDraft.text.trim()
+        val downstreamIpInterfaceError = stringResource(R.string.tethering_downstream_ip_error_interface)
         val downstreamIpDraftError = try {
-            if (iface.isEmpty()) stringResource(R.string.tethering_downstream_ip_error_interface) else {
+            if (iface.isEmpty()) downstreamIpInterfaceError else {
                 DownstreamIpSetter.parseIpv4Addresses(addressValue)
                 null
             }
