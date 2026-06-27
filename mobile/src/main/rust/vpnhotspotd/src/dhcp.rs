@@ -2,7 +2,6 @@ use std::ffi::CString;
 use std::io;
 use std::net::Ipv4Addr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
-use std::time::Duration;
 
 use tokio::process::Command;
 use tokio::task::JoinHandle;
@@ -27,7 +26,6 @@ struct Config {
     dev: String,
     ifindex: i32,
     server: Ipv4Addr,
-    prefix: u32,
     mask: Ipv4Addr,
     network: u32,
     broadcast: u32,
@@ -102,7 +100,6 @@ impl Config {
             mac: read_mac(&dev)?,
             dev,
             server: server_ip,
-            prefix: server.prefix_length,
             mask: Ipv4Addr::from(mask_u32),
             network,
             broadcast,
@@ -281,7 +278,7 @@ fn build_reply(cfg: &Config, frame: &[u8]) -> Option<Vec<u8>> {
     if frame[dhcp + 1] != 1 || frame[dhcp + 2] != 6 {
         return None;
     }
-    if &frame[dhcp + 236..dhcp + 240] != [99, 130, 83, 99] {
+    if frame[dhcp + 236..dhcp + 240] != [99, 130, 83, 99] {
         return None;
     }
 
@@ -312,7 +309,7 @@ fn build_reply(cfg: &Config, frame: &[u8]) -> Option<Vec<u8>> {
     ))
 }
 
-fn option_value<'a>(options: &'a [u8], code: u8) -> Option<&'a [u8]> {
+fn option_value(options: &[u8], code: u8) -> Option<&[u8]> {
     let mut i = 0;
     while i < options.len() {
         let current = options[i];
@@ -459,14 +456,11 @@ async fn run_iptables(args: &[&str]) -> io::Result<()> {
     if output.status.success() {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "iptables {} failed: {}{}",
-                args.join(" "),
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr),
-            ),
-        ))
+        Err(io::Error::other(format!(
+            "iptables {} failed: {}{}",
+            args.join(" "),
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        )))
     }
 }
