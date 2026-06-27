@@ -405,10 +405,9 @@ fun TetheringScreen(
                         onConfigure = onConfigureAp,
                     )
                 }
-                val downstreamIpWifiTitle = stringResource(R.string.tethering_downstream_ip_wifi)
                 row(R.string.tethering_downstream_ip_wifi) {
                     DownstreamIpRow(
-                        title = downstreamIpWifiTitle,
+                        title = R.string.tethering_downstream_ip_wifi,
                         iface = wifiDownstreamIface,
                         address = DownstreamIpSetter.addresses(
                             wifiDownstreamIface,
@@ -417,7 +416,7 @@ fun TetheringScreen(
                         onClick = {
                             downstreamIpDialog = DownstreamIpDialog(
                                 kind = DownstreamIpSetter.KIND_WIFI,
-                                title = downstreamIpWifiTitle,
+                                title = R.string.tethering_downstream_ip_wifi,
                                 iface = wifiDownstreamIface,
                                 defaultAddress = DownstreamIpSetter.DEFAULT_WIFI_ADDRESS,
                             )
@@ -434,10 +433,9 @@ fun TetheringScreen(
                         snackbarHostState = snackbarHostState,
                     )
                 }
-                val downstreamIpUsbTitle = stringResource(R.string.tethering_downstream_ip_usb)
                 row(R.string.tethering_downstream_ip_usb) {
                     DownstreamIpRow(
-                        title = downstreamIpUsbTitle,
+                        title = R.string.tethering_downstream_ip_usb,
                         iface = usbDownstreamIface,
                         address = DownstreamIpSetter.addresses(
                             usbDownstreamIface,
@@ -446,7 +444,7 @@ fun TetheringScreen(
                         onClick = {
                             downstreamIpDialog = DownstreamIpDialog(
                                 kind = DownstreamIpSetter.KIND_USB,
-                                title = downstreamIpUsbTitle,
+                                title = R.string.tethering_downstream_ip_usb,
                                 iface = usbDownstreamIface,
                                 defaultAddress = DownstreamIpSetter.DEFAULT_USB_ADDRESS,
                             )
@@ -515,7 +513,7 @@ fun TetheringScreen(
         }
         AlertDialog(
             onDismissRequest = { downstreamIpDialog = null },
-            title = { Text(dialog.title) },
+            title = { Text(stringResource(dialog.title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     Text(
@@ -713,14 +711,14 @@ fun TetheringScreen(
 
 private data class DownstreamIpDialog(
     val kind: String,
-    val title: String,
+    @StringRes val title: Int,
     val iface: String,
     val defaultAddress: String,
 )
 
 @Composable
 private fun DownstreamIpRow(
-    title: String,
+    @StringRes title: Int,
     iface: String,
     address: String,
     onClick: () -> Unit,
@@ -728,7 +726,7 @@ private fun DownstreamIpRow(
     PreferenceRow(
         modifier = Modifier.padding(start = 48.dp),
         icon = R.drawable.ic_push_pin,
-        title = title,
+        title = stringResource(title),
         summary = stringResource(R.string.tethering_downstream_ip_summary, iface, address),
         onClick = onClick,
     )
