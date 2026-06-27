@@ -125,7 +125,7 @@ object DaemonController {
         request(ClientEnvelope(run_dhcp_server = RunDhcpServerCommand(
             dev = dev,
             server = IpAddressEntry(server.address.address.toByteString(), server.prefixLength),
-            lease_seconds = 3600U,
+            lease_seconds = 3600,
         ))).requireAck()
     }
 
