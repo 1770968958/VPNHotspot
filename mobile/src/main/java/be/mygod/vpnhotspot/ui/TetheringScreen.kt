@@ -405,9 +405,10 @@ fun TetheringScreen(
                         onConfigure = onConfigureAp,
                     )
                 }
+                val downstreamIpWifiTitle = stringResource(R.string.tethering_downstream_ip_wifi)
                 row(R.string.tethering_downstream_ip_wifi) {
                     DownstreamIpRow(
-                        title = stringResource(R.string.tethering_downstream_ip_wifi),
+                        title = downstreamIpWifiTitle,
                         iface = wifiDownstreamIface,
                         address = DownstreamIpSetter.addresses(
                             wifiDownstreamIface,
@@ -416,7 +417,7 @@ fun TetheringScreen(
                         onClick = {
                             downstreamIpDialog = DownstreamIpDialog(
                                 kind = DownstreamIpSetter.KIND_WIFI,
-                                title = context.getString(R.string.tethering_downstream_ip_wifi),
+                                title = downstreamIpWifiTitle,
                                 iface = wifiDownstreamIface,
                                 defaultAddress = DownstreamIpSetter.DEFAULT_WIFI_ADDRESS,
                             )
@@ -433,9 +434,10 @@ fun TetheringScreen(
                         snackbarHostState = snackbarHostState,
                     )
                 }
+                val downstreamIpUsbTitle = stringResource(R.string.tethering_downstream_ip_usb)
                 row(R.string.tethering_downstream_ip_usb) {
                     DownstreamIpRow(
-                        title = stringResource(R.string.tethering_downstream_ip_usb),
+                        title = downstreamIpUsbTitle,
                         iface = usbDownstreamIface,
                         address = DownstreamIpSetter.addresses(
                             usbDownstreamIface,
@@ -444,7 +446,7 @@ fun TetheringScreen(
                         onClick = {
                             downstreamIpDialog = DownstreamIpDialog(
                                 kind = DownstreamIpSetter.KIND_USB,
-                                title = context.getString(R.string.tethering_downstream_ip_usb),
+                                title = downstreamIpUsbTitle,
                                 iface = usbDownstreamIface,
                                 defaultAddress = DownstreamIpSetter.DEFAULT_USB_ADDRESS,
                             )
@@ -498,6 +500,9 @@ fun TetheringScreen(
         val iface = ifaceDraft.text.trim()
         val addressValue = addressDraft.text.trim()
         val downstreamIpInterfaceError = stringResource(R.string.tethering_downstream_ip_error_interface)
+        val downstreamIpInterfaceLabel = stringResource(R.string.tethering_downstream_ip_interface)
+        val downstreamIpAddressesLabel = stringResource(R.string.tethering_downstream_ip_addresses)
+        val downstreamIpApplied = stringResource(R.string.tethering_downstream_ip_applied, addressValue, iface)
         val downstreamIpDraftError = try {
             if (iface.isEmpty()) downstreamIpInterfaceError else {
                 DownstreamIpSetter.parseIpv4Addresses(addressValue)
@@ -523,8 +528,8 @@ fun TetheringScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .focusRequester(focusRequester)
-                            .semantics { contentDescription = context.getString(R.string.tethering_downstream_ip_interface) },
-                        label = { Text(stringResource(R.string.tethering_downstream_ip_interface)) },
+                            .semantics { contentDescription = downstreamIpInterfaceLabel },
+                        label = { Text(downstreamIpInterfaceLabel) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         singleLine = true,
                         shape = OutlinedTextFieldDefaults.roundedShape,
@@ -535,8 +540,8 @@ fun TetheringScreen(
                         onValueChange = { addressDraft = it },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .semantics { contentDescription = context.getString(R.string.tethering_downstream_ip_addresses) },
-                        label = { Text(stringResource(R.string.tethering_downstream_ip_addresses)) },
+                            .semantics { contentDescription = downstreamIpAddressesLabel },
+                        label = { Text(downstreamIpAddressesLabel) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                         isError = downstreamIpDraftError != null,
                         singleLine = true,
@@ -566,9 +571,7 @@ fun TetheringScreen(
                             try {
                                 DownstreamIpSetter.apply(dialog.kind, iface, addressValue)
                                 onRefresh()
-                                snackbarHostState.showLongSnackbar(
-                                    context.getString(R.string.tethering_downstream_ip_applied, addressValue, iface),
-                                )
+                                snackbarHostState.showLongSnackbar(downstreamIpApplied)
                             } catch (e: CancellationException) {
                                 throw e
                             } catch (e: Exception) {
