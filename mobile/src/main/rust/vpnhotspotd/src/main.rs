@@ -1,6 +1,7 @@
 mod control;
 mod dns;
 mod downstream;
+mod dhcp;
 mod firewall;
 mod ipsec;
 mod nat66;

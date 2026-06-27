@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use crate::neighbour::Monitor;
 use crate::report::{ControllerSender, ControllerSenderExt};
 use crate::session::Session;
-use crate::{ipsec, nat66, netlink, report, routing};
+use crate::{dhcp, ipsec, nat66, netlink, report, routing};
 use vpnhotspotd::shared::ipsec::{IpSecForwardPolicyTarget, UpstreamTracker};
 use vpnhotspotd::shared::proto::daemon;
 use vpnhotspotd::shared::protocol::{
@@ -42,6 +42,7 @@ pub(crate) async fn run(socket_name: String) -> io::Result<()> {
         sessions: Mutex::new(HashMap::new()),
         ipv6_nat_firewall_base: Mutex::new(false),
         neighbour_monitor: Mutex::new(None),
+        dhcp_servers: Mutex::new(HashMap::new()),
     });
     let active_calls: Arc<Mutex<HashMap<u64, Arc<CallState>>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -155,6 +156,7 @@ struct State {
     sessions: Mutex<HashMap<u64, Arc<SessionState>>>,
     ipv6_nat_firewall_base: Mutex<bool>,
     neighbour_monitor: Mutex<Option<MonitorState>>,
+    dhcp_servers: Mutex<HashMap<String, dhcp::ServerState>>,
 }
 
 struct SessionState {
@@ -186,6 +188,10 @@ impl State {
     async fn stop(&self, withdraw_cleanup: bool) {
         if let Some(monitor) = self.neighbour_monitor.lock().await.take() {
             monitor.monitor.stop().await;
+        }
+        let dhcp_servers = self.dhcp_servers.lock().await.drain().map(|(_, server)| server).collect::<Vec<_>>();
+        for server in dhcp_servers {
+            server.stop().await;
         }
         let sessions = self.drain_sessions().await;
         stop_sessions(&sessions, withdraw_cleanup).await;
@@ -371,6 +377,25 @@ async fn handle_command(
                         ("count", command.addresses.len().to_string()),
                     ],
                 )?;
+            Ok(CallOutput::Reply(ack_reply_frame(id)))
+        }
+        daemon::client_envelope::Command::RunDhcpServer(command) => {
+            let dev = command.dev.clone();
+            if let Some(server) = state.dhcp_servers.lock().await.remove(&dev) {
+                server.stop().await;
+            }
+            let server = dhcp::start(command)
+                .await
+                .with_report_context_details("control.run_dhcp_server", [("dev", dev.as_str())])?;
+            state.dhcp_servers.lock().await.insert(dev, server);
+            Ok(CallOutput::Reply(ack_reply_frame(id)))
+        }
+        daemon::client_envelope::Command::StopDhcpServer(command) => {
+            if let Some(server) = state.dhcp_servers.lock().await.remove(&command.dev) {
+                server.stop().await;
+            } else {
+                dhcp::stop(&command.dev).await;
+            }
             Ok(CallOutput::Reply(ack_reply_frame(id)))
         }
         daemon::client_envelope::Command::CleanRouting(command) => {

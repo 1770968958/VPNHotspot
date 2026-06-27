@@ -16,6 +16,8 @@ message ClientEnvelope {
     StartNeighbourMonitorCommand start_neighbour_monitor = 6;
     CleanRoutingCommand clean_routing = 7;
     ReplaceStaticAddressesCommand replace_static_addresses = 8;
+    RunDhcpServerCommand run_dhcp_server = 9;
+    StopDhcpServerCommand stop_dhcp_server = 10;
   }
 }
 
@@ -41,6 +43,16 @@ message CleanRoutingCommand {
 message ReplaceStaticAddressesCommand {
   string dev = 1;
   repeated IpAddressEntry addresses = 2;
+}
+
+message RunDhcpServerCommand {
+  string dev = 1;
+  IpAddressEntry server = 2;
+  uint32 lease_seconds = 3;
+}
+
+message StopDhcpServerCommand {
+  string dev = 1;
 }
 
 message SessionConfig {

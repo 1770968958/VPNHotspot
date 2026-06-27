@@ -121,6 +121,18 @@ object DaemonController {
         ))).requireAck()
     }
 
+    suspend fun runDhcpServer(dev: String, server: LinkAddress) {
+        request(ClientEnvelope(run_dhcp_server = RunDhcpServerCommand(
+            dev = dev,
+            server = IpAddressEntry(server.address.address.toByteString(), server.prefixLength),
+            lease_seconds = 3600,
+        ))).requireAck()
+    }
+
+    suspend fun stopDhcpServer(dev: String) {
+        request(ClientEnvelope(stop_dhcp_server = StopDhcpServerCommand(dev = dev))).requireAck()
+    }
+
     suspend fun cleanRouting(ipv6NatPrefixSeed: String) {
         request(ClientEnvelope(clean_routing = CleanRoutingCommand(ipv6NatPrefixSeed))).requireAck()
     }
