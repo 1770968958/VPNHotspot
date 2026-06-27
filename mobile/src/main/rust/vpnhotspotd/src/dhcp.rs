@@ -20,12 +20,14 @@ const DHCP_DISCOVER: u8 = 1;
 const DHCP_OFFER: u8 = 2;
 const DHCP_REQUEST: u8 = 3;
 const DHCP_ACK: u8 = 5;
+const DNS_SERVERS: [u8; 8] = [223, 5, 5, 5, 119, 29, 29, 29];
 
 #[derive(Clone)]
 struct Config {
     dev: String,
     ifindex: i32,
     server: Ipv4Addr,
+    source_cidr: String,
     mask: Ipv4Addr,
     network: u32,
     broadcast: u32,
@@ -35,6 +37,7 @@ struct Config {
 
 pub(crate) struct ServerState {
     dev: String,
+    source_cidr: String,
     cancel: CancellationToken,
     task: JoinHandle<io::Result<()>>,
 }
@@ -47,20 +50,21 @@ impl ServerState {
             Ok(Err(e)) => report::io("dhcp.server", e),
             Err(e) => report::message("dhcp.server_join", e.to_string(), "JoinError"),
         }
-        delete_block_rule(&self.dev).await;
+        delete_rules_by(&self.dev, &self.source_cidr).await;
     }
 }
 
 pub(crate) async fn start(command: daemon::RunDhcpServerCommand) -> io::Result<ServerState> {
     let cfg = Config::from_command(command)?;
-    delete_block_rule(&cfg.dev).await;
-    install_block_rule(&cfg.dev).await?;
+    delete_rules_by(&cfg.dev, &cfg.source_cidr).await;
+    install_rules(&cfg).await?;
     let fd = bind_packet_socket(&cfg)?;
     let cancel = CancellationToken::new();
     let task_cancel = cancel.clone();
     let dev = cfg.dev.clone();
+    let source_cidr = cfg.source_cidr.clone();
     let task = tokio::task::spawn_blocking(move || run_loop(fd, cfg, task_cancel));
-    Ok(ServerState { dev, cancel, task })
+    Ok(ServerState { dev, source_cidr, cancel, task })
 }
 
 pub(crate) async fn stop(dev: &str) {
@@ -95,11 +99,13 @@ impl Config {
         let mask_u32 = u32::MAX << (32 - server.prefix_length);
         let network = server_u32 & mask_u32;
         let broadcast = network | !mask_u32;
+        let source_cidr = format!("{}/{}", Ipv4Addr::from(network), server.prefix_length);
         Ok(Config {
             ifindex: ifindex(&dev)?,
             mac: read_mac(&dev)?,
             dev,
             server: server_ip,
+            source_cidr,
             mask: Ipv4Addr::from(mask_u32),
             network,
             broadcast,
@@ -360,7 +366,7 @@ fn build_dhcp_packet(
     push_option(&mut dhcp, 54, &cfg.server.octets());
     push_option(&mut dhcp, 1, &cfg.mask.octets());
     push_option(&mut dhcp, 3, &cfg.server.octets());
-    push_option(&mut dhcp, 6, &cfg.server.octets());
+    push_option(&mut dhcp, 6, &DNS_SERVERS);
     push_option(&mut dhcp, 28, &Ipv4Addr::from(cfg.broadcast).octets());
     push_option(&mut dhcp, 51, &cfg.lease_seconds.to_be_bytes());
     push_option(&mut dhcp, 58, &(cfg.lease_seconds / 2).to_be_bytes());
@@ -425,32 +431,126 @@ fn checksum(bytes: &[u8]) -> u16 {
     !(sum as u16)
 }
 
-async fn install_block_rule(dev: &str) -> io::Result<()> {
+async fn install_rules(cfg: &Config) -> io::Result<()> {
+    match install_rules_inner(cfg).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            delete_rules_by(&cfg.dev, &cfg.source_cidr).await;
+            Err(e)
+        }
+    }
+}
+
+async fn install_rules_inner(cfg: &Config) -> io::Result<()> {
     run_iptables(&[
-        "-I", "OUTPUT", "1",
+        "-I",
+        "OUTPUT",
+        "1",
+        "-o",
+        cfg.dev.as_str(),
+        "-p",
+        "udp",
+        "--sport",
+        "67",
+        "--dport",
+        "68",
+        "-j",
+        "DROP",
+    ])
+    .await?;
+    run_iptables(&[
+        "-I",
+        "FORWARD",
+        "1",
+        "-i",
+        cfg.dev.as_str(),
+        "-s",
+        cfg.source_cidr.as_str(),
+        "-j",
+        "ACCEPT",
+    ])
+    .await?;
+    run_iptables(&[
+        "-I",
+        "FORWARD",
+        "1",
+        "-o",
+        cfg.dev.as_str(),
+        "-d",
+        cfg.source_cidr.as_str(),
+        "-j",
+        "ACCEPT",
+    ])
+    .await?;
+    run_iptables(&[
+        "-t",
+        "nat",
+        "-I",
+        "POSTROUTING",
+        "1",
+        "-s",
+        cfg.source_cidr.as_str(),
+        "-j",
+        "MASQUERADE",
+    ])
+    .await
+}
+
+async fn delete_rules_by(dev: &str, source_cidr: &str) {
+    delete_rule(&[
+        "-t",
+        "nat",
+        "-D",
+        "POSTROUTING",
+        "-s",
+        source_cidr,
+        "-j",
+        "MASQUERADE",
+    ])
+    .await;
+    delete_rule(&[
+        "-D",
+        "FORWARD",
+        "-o",
+        dev,
+        "-d",
+        source_cidr,
+        "-j",
+        "ACCEPT",
+    ])
+    .await;
+    delete_rule(&[
+        "-D",
+        "FORWARD",
+        "-i",
+        dev,
+        "-s",
+        source_cidr,
+        "-j",
+        "ACCEPT",
+    ])
+    .await;
+    delete_block_rule(dev).await;
+}
+
+async fn delete_block_rule(dev: &str) {
+    delete_rule(&[
+        "-D", "OUTPUT",
         "-o", dev,
         "-p", "udp",
         "--sport", "67",
         "--dport", "68",
         "-j", "DROP",
-    ]).await
+    ]).await;
 }
 
-async fn delete_block_rule(dev: &str) {
+async fn delete_rule(args: &[&str]) {
     for _ in 0..16 {
-        if run_iptables(&[
-            "-D", "OUTPUT",
-            "-o", dev,
-            "-p", "udp",
-            "--sport", "67",
-            "--dport", "68",
-            "-j", "DROP",
-        ]).await.is_err() {
+        if run_iptables(args).await.is_err() {
             break;
         }
     }
 }
-
 async fn run_iptables(args: &[&str]) -> io::Result<()> {
     let output = Command::new("iptables").args(args).output().await?;
     if output.status.success() {
