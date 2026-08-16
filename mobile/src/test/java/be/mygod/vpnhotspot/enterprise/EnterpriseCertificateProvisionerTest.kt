@@ -12,6 +12,7 @@ import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
 import java.security.spec.PKCS8EncodedKeySpec
 import java.util.Base64
+import kotlin.io.path.createTempDirectory
 
 class EnterpriseCertificateProvisionerTest {
     @Test
@@ -89,7 +90,7 @@ class EnterpriseCertificateProvisionerTest {
     )
 
     private inline fun withTempDir(block: (File) -> Unit) {
-        val root = createTempDir(prefix = "enterprise-pki-")
+        val root = createTempDirectory("enterprise-pki-").toFile()
         try {
             block(root)
         } finally {
