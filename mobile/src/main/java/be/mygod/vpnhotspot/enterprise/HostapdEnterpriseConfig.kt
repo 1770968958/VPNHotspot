@@ -46,7 +46,6 @@ object HostapdEnterpriseConfig {
             ca_cert=${paths.caCertificate}
             server_cert=${paths.serverCertificate}
             private_key=${paths.serverPrivateKey}
-            server_id=${profile.serverIdentity}
         """.trimIndent()
         val eapUsers = buildString {
             append("* PEAP\n")
