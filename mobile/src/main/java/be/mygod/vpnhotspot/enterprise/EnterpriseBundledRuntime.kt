@@ -12,7 +12,9 @@ import java.util.zip.GZIPInputStream
 /** APK-owned, device-verified hostapd runtime for arm64-v8a. */
 object EnterpriseBundledRuntime {
     const val VERSION = "mi9-20260816-6fb878d958fc0996"
-    private const val ASSET = "enterprise/arm64-v8a/mi9-hostapd-runtime.tar.gz"
+    // Do not use a .gz asset name here: Android packaging transparently expands/renames .gz assets.
+    // A neutral extension preserves the original gzip byte stream so GZIPInputStream sees the expected format.
+    private const val ASSET = "enterprise/arm64-v8a/mi9-hostapd-runtime.bin"
     private const val MARKER = ".ready"
 
     private val expectedSha256 = linkedMapOf(

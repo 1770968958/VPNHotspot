@@ -49,7 +49,9 @@ The renderer does not start processes and does not know Android interface owners
 
 The device-verified arm64 runtime is shipped as:
 
-`mobile/src/main/assets/enterprise/arm64-v8a/mi9-hostapd-runtime.tar.gz`
+`mobile/src/main/assets/enterprise/arm64-v8a/mi9-hostapd-runtime.bin`
+
+The `.bin` extension is intentional. Android's asset packaging recognizes `.gz` files and may transparently decompress them and strip the `.gz` suffix in the APK. Using a neutral extension keeps the original gzip byte stream and stable asset path; `EnterpriseBundledRuntime` then performs the gzip/tar decoding itself.
 
 `EnterpriseBundledRuntime` extracts only a fixed whitelist of required files and verifies each file against a pinned SHA-256 digest. `EnterpriseApCommands.InstallRuntime` then copies those verified files into a root-owned executable directory under `/data/local/tmp/vpnhotspot-enterprise` and atomically selects the version through a `current` symlink.
 
