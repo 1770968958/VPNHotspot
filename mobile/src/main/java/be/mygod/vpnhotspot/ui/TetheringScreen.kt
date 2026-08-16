@@ -297,6 +297,9 @@ fun TetheringScreen(
                         onCheckedChange = if (onConfigureTemporaryHotspot == null) null else toggleLocalOnly,
                     )
                 }
+                row(R.string.tethering_suiteb192) {
+                    SuiteB192TetheringRow()
+                }
                 row(R.string.tethering_static_ip) {
                     TetheringRow(
                         icon = R.drawable.ic_push_pin,
