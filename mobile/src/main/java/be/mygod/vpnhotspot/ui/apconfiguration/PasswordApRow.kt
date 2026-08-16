@@ -40,6 +40,14 @@ import be.mygod.vpnhotspot.ui.rememberDialogFocusRequester
 
 @Composable
 fun PasswordApRow(state: ApConfigurationState) {
+    val enterpriseMode = state.enterpriseMode ?: EnterpriseSecurityAdapter.mode(state.selectedSecurityType)
+    if (enterpriseMode != null) {
+        EnterpriseUsersRow(enterpriseMode) {
+            EnterpriseSecurityAdapter.value(enterpriseMode)?.let(state::selectSecurity)
+        }
+        return
+    }
+
     val context = LocalContext.current
     val maxLength = state.passwordMaxLength
     var editing by rememberSaveable(state.password) { mutableStateOf(false) }
