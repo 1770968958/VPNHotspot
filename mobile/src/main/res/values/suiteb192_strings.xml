@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tethering_suiteb192">WPA3-Enterprise 192-bit</string>
+    <string name="tethering_suiteb192_summary">MI9-SuiteB192-Lab · wlan2</string>
+</resources>
