@@ -1,9 +1,9 @@
 package be.mygod.vpnhotspot
 
-import android.content.Context
 import android.content.Intent
 import be.mygod.vpnhotspot.root.RootManager
 import be.mygod.vpnhotspot.root.SuiteB192Commands
+import be.mygod.vpnhotspot.util.TileServiceDismissHandle
 import be.mygod.vpnhotspot.widget.SmartSnackbar
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -14,12 +14,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.parcelize.Parcelize
 import timber.log.Timber
 
 class SuiteB192HotspotService : NetlinkNeighbourMonitoringService() {
     companion object {
         private const val IFACE = SuiteB192Commands.IFACE
+
+        var dismissHandle: TileServiceDismissHandle? = null
+        private fun dismissIfApplicable() = dismissHandle?.run {
+            get()?.dismiss()
+            dismissHandle = null
+        }
     }
 
     class Binder(owner: SuiteB192HotspotService) : android.os.Binder() {
@@ -30,13 +35,6 @@ class SuiteB192HotspotService : NetlinkNeighbourMonitoringService() {
 
         fun detach() {
             service = null
-        }
-    }
-
-    @Parcelize
-    class Starter : BootReceiver.Startable {
-        override fun start(context: Context) {
-            context.startForegroundService(Intent(context, SuiteB192HotspotService::class.java))
         }
     }
 
@@ -64,7 +62,7 @@ class SuiteB192HotspotService : NetlinkNeighbourMonitoringService() {
                     check(manager.start()) { "Failed to start VPN Hotspot routing for $IFACE" }
                     active.value = true
                     interfaces.value = Interfaces(active = listOf(IFACE))
-                    BootReceiver.add<SuiteB192HotspotService>(Starter())
+                    dismissIfApplicable()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -80,6 +78,7 @@ class SuiteB192HotspotService : NetlinkNeighbourMonitoringService() {
                     }
                     active.value = false
                     interfaces.value = null
+                    dismissIfApplicable()
                     ServiceNotification.stopForeground(this@SuiteB192HotspotService)
                     stopSelf()
                 }
@@ -94,7 +93,6 @@ class SuiteB192HotspotService : NetlinkNeighbourMonitoringService() {
         launch {
             mutex.withLock {
                 try {
-                    BootReceiver.delete<SuiteB192HotspotService>()
                     active.value = false
                     interfaces.value = null
                     val manager = routingManager
