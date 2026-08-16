@@ -43,36 +43,50 @@ object SuiteB192Commands {
                 [ -f "${'$'}CONFIG" ] || { echo "Missing ${'$'}CONFIG"; exit 11; }
                 LIBDIR=/data/data/com.termux/files/usr/lib
                 [ ! -r '$TERMUX_LIBDIR' ] || LIBDIR="${'$'}(cat '$TERMUX_LIBDIR')"
+                pid_matches() {
+                    [ -n "${'$'}1" ] && [ -r "/proc/${'$'}1/cmdline" ] || return 1
+                    tr '\000' ' ' < "/proc/${'$'}1/cmdline" 2>/dev/null | grep -F -- "${'$'}CONFIG" >/dev/null
+                }
                 cleanup() {
                     ndc network route remove local "${'$'}IFACE" '$SUBNET' >/dev/null 2>&1 || true
                     ndc network interface remove local "${'$'}IFACE" >/dev/null 2>&1 || true
                     ndc tether interface remove "${'$'}IFACE" >/dev/null 2>&1 || true
                     if [ -r "${'$'}PID" ]; then
                         HPID="${'$'}(cat "${'$'}PID" 2>/dev/null || true)"
-                        [ -z "${'$'}HPID" ] || kill "${'$'}HPID" >/dev/null 2>&1 || true
+                        if pid_matches "${'$'}HPID"; then kill "${'$'}HPID" >/dev/null 2>&1 || true; fi
                     fi
                     rm -f "${'$'}PID"
                     iw dev "${'$'}IFACE" del >/dev/null 2>&1 || true
                 }
-                trap 'cleanup' EXIT
                 HOSTAPD_RUNNING=0
+                HAD_OWNERSHIP_MARKER=0
                 if [ -r "${'$'}PID" ]; then
+                    HAD_OWNERSHIP_MARKER=1
                     HPID="${'$'}(cat "${'$'}PID" 2>/dev/null || true)"
-                    if [ -n "${'$'}HPID" ] && kill -0 "${'$'}HPID" >/dev/null 2>&1 && ip link show "${'$'}IFACE" >/dev/null 2>&1; then
+                    if pid_matches "${'$'}HPID" && ip link show "${'$'}IFACE" >/dev/null 2>&1; then
                         HOSTAPD_RUNNING=1
                     else
-                        cleanup
+                        if pid_matches "${'$'}HPID"; then kill "${'$'}HPID" >/dev/null 2>&1 || true; fi
+                        rm -f "${'$'}PID"
                     fi
                 fi
+                if [ "${'$'}HOSTAPD_RUNNING" -eq 0 ] && ip link show "${'$'}IFACE" >/dev/null 2>&1; then
+                    if [ "${'$'}HAD_OWNERSHIP_MARKER" -eq 1 ]; then
+                        iw dev "${'$'}IFACE" del >/dev/null 2>&1 || true
+                    else
+                        echo "${'$'}IFACE already exists without an app-owned Suite-B PID marker"
+                        exit 15
+                    fi
+                fi
+                trap 'cleanup' EXIT
                 if [ "${'$'}HOSTAPD_RUNNING" -eq 0 ]; then
-                    iw dev "${'$'}IFACE" del >/dev/null 2>&1 || true
                     iw phy phy0 interface add "${'$'}IFACE" type __ap
                     ip link set "${'$'}IFACE" down >/dev/null 2>&1 || true
                     ip link set "${'$'}IFACE" address 6a:66:77:88:99:a8
                     : > "${'$'}LOG"
                     LD_LIBRARY_PATH="${'$'}LIBDIR" "${'$'}HOSTAPD" -B -P "${'$'}PID" -f "${'$'}LOG" -dd -t "${'$'}CONFIG"
                     HPID="${'$'}(cat "${'$'}PID")"
-                    kill -0 "${'$'}HPID"
+                    pid_matches "${'$'}HPID"
                 fi
                 ndc interface setcfg "${'$'}IFACE" '$GATEWAY' 24 up >/dev/null
                 ndc tether start "${'$'}DHCP_START" "${'$'}DHCP_END" >/dev/null 2>&1 || true
@@ -109,16 +123,21 @@ object SuiteB192Commands {
         override suspend fun execute() = null.also {
             shell("""
                 IFACE='$IFACE'
+                CONFIG='$CONFIG'
                 PID='$PID'
+                pid_matches() {
+                    [ -n "${'$'}1" ] && [ -r "/proc/${'$'}1/cmdline" ] || return 1
+                    tr '\000' ' ' < "/proc/${'$'}1/cmdline" 2>/dev/null | grep -F -- "${'$'}CONFIG" >/dev/null
+                }
                 ndc network route remove local "${'$'}IFACE" '$SUBNET' >/dev/null 2>&1 || true
                 ndc network interface remove local "${'$'}IFACE" >/dev/null 2>&1 || true
                 ndc tether interface remove "${'$'}IFACE" >/dev/null 2>&1 || true
                 if [ -r "${'$'}PID" ]; then
                     HPID="${'$'}(cat "${'$'}PID" 2>/dev/null || true)"
-                    [ -z "${'$'}HPID" ] || kill "${'$'}HPID" >/dev/null 2>&1 || true
+                    if pid_matches "${'$'}HPID"; then kill "${'$'}HPID" >/dev/null 2>&1 || true; fi
+                    rm -f "${'$'}PID"
+                    iw dev "${'$'}IFACE" del >/dev/null 2>&1 || true
                 fi
-                rm -f "${'$'}PID"
-                iw dev "${'$'}IFACE" del >/dev/null 2>&1 || true
             """.trimIndent())
         }
     }
