@@ -15,7 +15,7 @@ import be.mygod.vpnhotspot.SuiteB192HotspotService
 import be.mygod.vpnhotspot.util.bindServiceFlow
 
 @Composable
-fun SuiteB192TetheringRow() {
+internal fun SuiteB192TetheringRow() {
     val context = LocalContext.current
     val inspectionMode = LocalInspectionMode.current
     val binder by if (inspectionMode) {
