@@ -35,6 +35,7 @@ object SuiteB192Commands {
             shell("""
                 set -eu
                 IFACE='$IFACE'
+                BSSID='$BSSID'
                 HOSTAPD='$HOSTAPD'
                 CONFIG='$CONFIG'
                 PID='$PID'
@@ -61,7 +62,9 @@ object SuiteB192Commands {
                     OWNER_IFINDEX="${'$'}(awk 'NR == 1 { print ${'$'}2 }' "${'$'}OWNER" 2>/dev/null)"
                     case "${'$'}OWNER_IFINDEX" in *[!0-9]*|'') return 1 ;; esac
                     [ -r "/sys/class/net/${'$'}IFACE/ifindex" ] || return 1
-                    [ "${'$'}(cat "/sys/class/net/${'$'}IFACE/ifindex")" = "${'$'}OWNER_IFINDEX" ]
+                    [ "${'$'}(cat "/sys/class/net/${'$'}IFACE/ifindex")" = "${'$'}OWNER_IFINDEX" ] || return 1
+                    [ -r "/sys/class/net/${'$'}IFACE/address" ] || return 1
+                    [ "${'$'}(cat "/sys/class/net/${'$'}IFACE/address")" = "${'$'}BSSID" ]
                 }
                 cleanup() {
                     if owner_boot_current; then
@@ -90,7 +93,7 @@ object SuiteB192Commands {
                     rm -f "${'$'}PID" "${'$'}OWNER"
                 fi
                 if [ "${'$'}HOSTAPD_RUNNING" -eq 0 ] && ip link show "${'$'}IFACE" >/dev/null 2>&1; then
-                    echo "${'$'}IFACE already exists without a current-boot app ownership marker"
+                    echo "${'$'}IFACE already exists without a matching current-boot app ownership marker"
                     exit 15
                 fi
                 trap 'cleanup' EXIT
@@ -99,9 +102,9 @@ object SuiteB192Commands {
                     iw phy phy0 interface add "${'$'}IFACE" type __ap
                     CREATED_IFACE=1
                     IFINDEX="${'$'}(cat "/sys/class/net/${'$'}IFACE/ifindex")"
-                    printf '%s %s\n' "${'$'}BOOT_ID" "${'$'}IFINDEX" > "${'$'}OWNER"
                     ip link set "${'$'}IFACE" down >/dev/null 2>&1 || true
-                    ip link set "${'$'}IFACE" address '$BSSID'
+                    ip link set "${'$'}IFACE" address "${'$'}BSSID"
+                    printf '%s %s\n' "${'$'}BOOT_ID" "${'$'}IFINDEX" > "${'$'}OWNER"
                     : > "${'$'}LOG"
                     LD_LIBRARY_PATH="${'$'}LIBDIR" "${'$'}HOSTAPD" -B -P "${'$'}PID" -f "${'$'}LOG" -dd -t "${'$'}CONFIG"
                     HPID="${'$'}(cat "${'$'}PID")"
@@ -142,6 +145,7 @@ object SuiteB192Commands {
         override suspend fun execute() = null.also {
             shell("""
                 IFACE='$IFACE'
+                BSSID='$BSSID'
                 CONFIG='$CONFIG'
                 PID='$PID'
                 OWNER='$OWNER'
@@ -159,7 +163,9 @@ object SuiteB192Commands {
                     OWNER_IFINDEX="${'$'}(awk 'NR == 1 { print ${'$'}2 }' "${'$'}OWNER" 2>/dev/null)"
                     case "${'$'}OWNER_IFINDEX" in *[!0-9]*|'') return 1 ;; esac
                     [ -r "/sys/class/net/${'$'}IFACE/ifindex" ] || return 1
-                    [ "${'$'}(cat "/sys/class/net/${'$'}IFACE/ifindex")" = "${'$'}OWNER_IFINDEX" ]
+                    [ "${'$'}(cat "/sys/class/net/${'$'}IFACE/ifindex")" = "${'$'}OWNER_IFINDEX" ] || return 1
+                    [ -r "/sys/class/net/${'$'}IFACE/address" ] || return 1
+                    [ "${'$'}(cat "/sys/class/net/${'$'}IFACE/address")" = "${'$'}BSSID" ]
                 }
                 if owner_boot_current; then
                     ndc network route remove local "${'$'}IFACE" '$SUBNET' >/dev/null 2>&1 || true
