@@ -42,7 +42,10 @@ class EnterpriseHostapdRuntime(
                 request.ap.band == EnterpriseApSpec.Band.BAND_5GHZ -> 149
                 else -> 6
             },
-            bssid = request.ap.bssid ?: DEFAULT_BSSID,
+            // wlan2 is an independent virtual AP interface. Never reuse the platform Soft AP (wlan1) BSSID:
+            // Qualcomm rejects assigning the same MAC to both interfaces with EINVAL. Keep the backend-owned,
+            // locally-administered BSSID that was verified on the target device.
+            bssid = DEFAULT_BSSID,
         )
         val prepared = workspace.prepare(request.copy(ap = resolvedAp), IFACE)
         val bssid = checkNotNull(resolvedAp.bssid).lowercase()

@@ -12,7 +12,10 @@ fun SoftApConfigurationCompat.toEnterpriseApSpec(countryCode: String = "CN"): En
         ssid = name,
         band = runtimeBand,
         channel = channel,
-        bssid = bssid?.toString(),
+        // The platform Soft AP BSSID belongs to its own interface (typically wlan1). Reusing it for our
+        // independent Enterprise interface can make the Wi-Fi driver reject the MAC with EINVAL. The
+        // Enterprise backend therefore owns a separate BSSID policy and must not inherit this value.
+        bssid = null,
         hidden = isHiddenSsid,
         countryCode = countryCode,
     ).also(EnterpriseApSpec::validate)
