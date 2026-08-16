@@ -114,6 +114,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keep DNS servers alive while tethering services are active" />
         </service>
+        <service
+            android:name=".SuiteB192HotspotService"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Run the experimental WPA3-Enterprise 192-bit hotspot and VPN routing" />
+        </service>
 
         <service
             android:name=".manage.RepeaterTileService"
@@ -135,6 +142,19 @@
             android:exported="true"
             android:icon="@drawable/ic_android_wifi_3_bar_plus"
             android:label="@string/tethering_temp_hotspot"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+        </service>
+        <service
+            android:name=".manage.SuiteB192HotspotTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_wifi_lock"
+            android:label="@string/tethering_suiteb192"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <intent-filter>
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
