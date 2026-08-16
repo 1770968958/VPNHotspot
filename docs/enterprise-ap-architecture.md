@@ -6,20 +6,20 @@ This branch adds WPA2/WPA3 Enterprise hotspot support as an extension layer arou
 
 1. Keep upstream merge conflicts small and predictable.
 2. Reuse VPN Hotspot for upstream selection, VPN routing, masquerade, DNS interception, client policy, statistics and cleanup.
-3. Keep Android `SoftApConfiguration` untouched for Enterprise modes because the Android framework API does not represent the custom hostapd configuration we need on the target device.
-4. Put Enterprise-specific state, hostapd rendering, runtime provisioning and credential management under one package: `be.mygod.vpnhotspot.enterprise`.
-5. Keep the existing AP configuration UI as the user-facing entry point. Enterprise security choices should appear beside Open/WPA2-PSK/WPA3-SAE rather than as a separate hotspot feature.
-6. Make the runtime replaceable. UI/domain code must not know whether hostapd comes from an APK asset, an extracted app-owned runtime, or a future platform capability.
+3. Keep Android `SoftApConfiguration` untouched for Enterprise modes because the Android framework API does not represent the custom hostapd configuration required by the target device.
+4. Put Enterprise-specific state, hostapd rendering, runtime provisioning and credential management under `be.mygod.vpnhotspot.enterprise`.
+5. Keep the existing AP configuration UI as the user-facing entry point. Enterprise security choices appear beside Open/WPA2-PSK/WPA3-SAE rather than as a separate hotspot feature.
+6. Keep the hostapd backend replaceable. UI/domain/routing code does not depend on binary packaging details.
 
 ## Upstream touch points
 
-The target is to keep long-lived changes to upstream-owned files limited to adapters:
+Long-lived changes to upstream-owned files are intentionally limited to adapters:
 
-- `ui/apconfiguration/ApConfigurationState.kt`: expose Enterprise security choices and hold the screen-local Enterprise selection.
-- `ui/apconfiguration/ApConfigurationScreen.kt`: show Enterprise user/certificate rows when an Enterprise mode is selected.
-- `ui/VpnHotspotApp.kt` / the Wi-Fi tethering start path: delegate save/start/stop to the Enterprise extension when Enterprise is selected.
+- `ui/apconfiguration/ApConfigurationState.kt`: exposes Enterprise security choices and holds the screen-local Enterprise selection.
+- `ui/apconfiguration/ApConfigurationScreen.kt` and related rows: shows Enterprise users when an Enterprise mode is selected.
+- `net/TetheringManagerCompat.kt`: intercepts Wi-Fi tether start/stop only when an Enterprise profile is configured.
 
-Everything else belongs in new files. If upstream rewrites its AP UI, only these adapters should need rebasing.
+Everything else lives in new Enterprise-specific files. If upstream rewrites its AP UI or tethering entry point, only these adapters should normally require rebasing.
 
 ## Domain model
 
@@ -28,56 +28,62 @@ Everything else belongs in new files. If upstream rewrites its AP UI, only these
 Initial modes:
 
 - `WPA2_ENTERPRISE`: integrated EAP server, PEAP + MSCHAPv2, multiple username/password credentials.
-- `WPA3_ENTERPRISE`: integrated EAP server, PEAP + MSCHAPv2, mandatory PMF; exact hostapd AKM/cipher policy stays in the renderer/runtime layer.
-- `WPA3_ENTERPRISE_192`: reserved for EAP-TLS / Suite-B-192 and certificate identities. It is intentionally not modeled as username/password authentication.
+- `WPA3_ENTERPRISE`: integrated EAP server, PEAP + MSCHAPv2, mandatory PMF.
+- `WPA3_ENTERPRISE_192`: reserved for EAP-TLS / Suite-B-192 and certificate identities.
 
 The first user-facing implementation exposes WPA2-Enterprise and WPA3-Enterprise. The 192-bit mode remains an advanced follow-up.
 
 ## Credential storage
 
-UI code talks to an `EnterpriseProfileRepository` interface. The first implementation may use app-private preferences, but callers must not depend on that storage format. This lets us replace it with an Android Keystore-backed implementation without changing the AP UI or hostapd renderer.
+UI code talks to an `EnterpriseProfileRepository` interface. Callers do not depend on a particular storage format, allowing future migration to stronger credential storage without changing the AP UI or hostapd renderer.
 
-Passwords are never written to logs. Generated runtime files live in app-owned/root-owned private storage and are created with restrictive permissions.
+Passwords are never intentionally written to logs. Generated session files live in app-owned private storage.
 
 ## Hostapd rendering
 
-`HostapdEnterpriseConfig` is a pure renderer. It receives a validated profile plus common AP parameters and produces:
+`HostapdEnterpriseConfig` is a pure renderer. It receives a validated profile plus common AP parameters and produces the Enterprise-specific hostapd configuration and the `eap_user` database.
 
-- the Enterprise-specific hostapd fragment;
-- an `eap_user` file for PEAP/MSCHAPv2 users.
+The renderer does not start processes and does not know Android interface ownership. This keeps authentication policy unit-testable and independent from device lifecycle code.
 
-The renderer does not start processes and does not know Android interface ownership. This makes it unit-testable and lets runtime code change independently.
+## Bundled runtime
 
-For PEAP/MSCHAPv2, the EAP user database contains a wildcard PEAP phase-1 entry followed by one enabled MSCHAPV2 phase-2 entry per account. The hostapd runtime must include integrated EAP, TLS, PEAP and MSCHAPv2 support.
+The device-verified arm64 runtime is shipped as:
 
-## Runtime boundary
+`mobile/src/main/assets/enterprise/arm64-v8a/mi9-hostapd-runtime.tar.gz`
 
-A future `EnterpriseApRuntime` interface owns:
+`EnterpriseBundledRuntime` extracts only a fixed whitelist of required files and verifies each file against a pinned SHA-256 digest. During the first bundled-runtime validation phase, `EnterpriseBundledRuntimeInstaller` materializes those verified files into the runtime location currently consumed by `EnterpriseApCommands`. Once device validation passes, the remaining legacy/Termux discovery code can be removed without changing UI/profile/routing layers.
 
-- provisioning a known hostapd build and its libraries into app-owned private storage;
-- server CA/certificate/key lifecycle;
-- creating/removing the AP interface;
-- writing generated hostapd/eap_user files;
-- starting/stopping hostapd;
-- exposing the downstream interface to `RoutingManager`;
-- deterministic rollback on partial startup.
+The runtime contains hostapd plus its private libnl/OpenSSL dependencies. No Termux package is required for the bundled runtime path.
 
-It must not duplicate VPN Hotspot's routing/NAT/DNS implementation.
+The APK runtime is currently arm64-v8a-specific. This limitation is isolated inside `EnterpriseBundledRuntime`/`EnterpriseHostapdRuntime`; adding another ABI does not require changes to UI/profile/routing code.
+
+## Runtime lifecycle
+
+`EnterpriseHostapdRuntime` performs the following sequence:
+
+1. validate AP/profile state;
+2. generate app-owned EAP users, server PKI and hostapd session configuration;
+3. verify/extract the bundled runtime;
+4. materialize the verified runtime for the root-owned hostapd process;
+5. create `wlan2`, set the owned BSSID, start hostapd and attach Android DHCP/local-network plumbing;
+6. expose `wlan2` to `RoutingManager.LocalOnly` through `EnterpriseHotspotService`.
+
+The Enterprise layer deliberately does not implement its own upstream selection, VPN policy, masquerade, DNS interception or client-routing engine.
 
 ## Platform configuration carrier
 
-Enterprise security is not encoded into `SoftApConfigurationCompat.securityType`. Common AP fields (SSID/channel/BSSID/etc.) can continue to use the existing screen state, while Enterprise mode/profile is carried separately by the extension model. This avoids inventing invalid Android security constants and prevents accidental calls to `WifiManager.setSoftApConfiguration()` with an unsupported Enterprise value.
+Enterprise security is not encoded into `SoftApConfigurationCompat.securityType`. Common AP fields such as SSID/channel/BSSID continue to use the existing screen state, while Enterprise mode/profile is carried separately. This prevents unsupported Enterprise values from being written into Android `SoftApConfiguration`.
 
 ## Rebase policy
 
-Keep `enterprise-ap-integration` rebased or merged from upstream `master` frequently. Never edit upstream routing daemon code unless an Enterprise downstream exposes a real missing abstraction. Prefer adding a narrow interface/adapter over copying an upstream class.
+Keep `enterprise-ap-integration` synchronized with upstream `master` frequently. Never copy or fork the routing daemon merely for Enterprise support. Prefer a narrow adapter around an upstream entry point.
 
-Before every upstream merge:
+Before an upstream merge is considered ready:
 
 1. merge/rebase upstream master;
-2. run upstream test workflow unchanged;
+2. run the upstream test workflow unchanged;
 3. compile Enterprise extension tests;
 4. validate the AP configuration adapter;
 5. run Mi 9 device smoke tests for WPA2-Enterprise and WPA3-Enterprise.
 
-The old `suiteb192-phase1-checkpoint` branch remains a device-verified recovery reference and is not the base for this architecture.
+The old `suiteb192-phase1-checkpoint` branch remains a recovery/reference checkpoint only and is not part of the current APK runtime implementation.

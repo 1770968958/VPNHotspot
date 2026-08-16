@@ -2,20 +2,16 @@ package be.mygod.vpnhotspot.enterprise
 
 import be.mygod.vpnhotspot.App.Companion.app
 import be.mygod.vpnhotspot.root.EnterpriseApCommands
+import be.mygod.vpnhotspot.root.EnterpriseBundledRuntimeInstaller
 import be.mygod.vpnhotspot.root.RootManager
 import java.io.File
 
-/**
- * Mi 9 phase-1 Enterprise backend.
- *
- * The hostapd executable is still the already-proven external build. All generated configuration, users and PKI
- * are app-owned. Replacing this class with an APK-packaged native backend later does not affect UI/profile code.
- */
+/** APK-bundled hostapd backend. UI/profile/routing layers are intentionally independent from this implementation. */
 class EnterpriseHostapdRuntime(
     private val rootDirectory: File = File(app.deviceStorage.filesDir, "enterprise-ap"),
 ) : EnterpriseApRuntime {
     companion object {
-        const val BACKEND_ID = "hostapd-external-v1"
+        const val BACKEND_ID = "hostapd-bundled-arm64-v1"
         const val IFACE = EnterpriseApCommands.IFACE
         private const val DEFAULT_BSSID = "6a:66:77:88:99:a8"
     }
@@ -27,13 +23,17 @@ class EnterpriseHostapdRuntime(
     private val ownerFile get() = File(runtimeDirectory, "hostapd.owner")
     private val bssidFile get() = File(runtimeDirectory, "bssid")
 
-    override suspend fun capability() = EnterpriseApRuntime.Capability(
-        wpa2Enterprise = true,
-        wpa3Enterprise = true,
-        detail = "external hostapd phase-1 backend",
-    )
+    override suspend fun capability(): EnterpriseApRuntime.Capability {
+        val supported = EnterpriseBundledRuntime.supported()
+        return EnterpriseApRuntime.Capability(
+            wpa2Enterprise = supported,
+            wpa3Enterprise = supported,
+            detail = if (supported) "APK-bundled arm64 hostapd runtime" else "Bundled Enterprise runtime requires arm64-v8a",
+        )
+    }
 
     override suspend fun start(request: EnterpriseApRuntime.Request): EnterpriseApRuntime.Session {
+        check(EnterpriseBundledRuntime.supported()) { "Bundled Enterprise hostapd runtime requires arm64-v8a" }
         require(request.profile.mode != EnterpriseSecurityMode.WPA3_ENTERPRISE_192) {
             "WPA3-Enterprise 192-bit is not enabled in the password-user backend"
         }
@@ -48,7 +48,12 @@ class EnterpriseHostapdRuntime(
         val prepared = workspace.prepare(request.copy(ap = resolvedAp), IFACE)
         val bssid = checkNotNull(resolvedAp.bssid).lowercase()
         writeAtomic(bssidFile, "$bssid\n")
+        val bundled = EnterpriseBundledRuntime.ensureStaged()
         RootManager.use { root ->
+            root.execute(EnterpriseBundledRuntimeInstaller.Install(
+                sourceDirectory = bundled.absolutePath,
+                version = EnterpriseBundledRuntime.VERSION,
+            ))
             root.execute(EnterpriseApCommands.Start(
                 configPath = prepared.hostapdConfig.absolutePath,
                 pidPath = prepared.pidFile.absolutePath,
