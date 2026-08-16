@@ -93,8 +93,6 @@ class SuiteB192HotspotService : NetlinkNeighbourMonitoringService() {
         launch {
             mutex.withLock {
                 try {
-                    active.value = false
-                    interfaces.value = null
                     val manager = routingManager
                     routingManager = null
                     manager?.stop()
@@ -105,7 +103,10 @@ class SuiteB192HotspotService : NetlinkNeighbourMonitoringService() {
                     Timber.w(e)
                     SmartSnackbar.make(e).show()
                 } finally {
+                    active.value = false
+                    interfaces.value = null
                     ServiceNotification.stopForeground(this@SuiteB192HotspotService)
+                    if (!exit) stopping = false
                     stopSelf()
                     if (exit) cancel()
                 }
