@@ -23,6 +23,7 @@ object EnterpriseApCommands {
     private const val DHCP_END = "192.168.77.200"
     private const val EXTERNAL_BASE = "/data/local/tmp/mi9-enterprise"
     private const val HOSTAPD = "$EXTERNAL_BASE/hostapd"
+    private const val STAGED_LIBDIR = "$EXTERNAL_BASE/lib"
     private const val TERMUX_LIBDIR = "$EXTERNAL_BASE/termux_libdir"
 
     private val SAFE_PATH = Regex("^/[A-Za-z0-9_./-]+$")
@@ -74,13 +75,27 @@ object EnterpriseApCommands {
                 LOG='$logPath'
                 DHCP_START='$DHCP_START'
                 DHCP_END='$DHCP_END'
+                STAGED_LIBDIR='$STAGED_LIBDIR'
+                TERMUX_LIBDIR='$TERMUX_LIBDIR'
                 BOOT_ID="${'$'}(cat /proc/sys/kernel/random/boot_id)"
                 CREATED_IFACE=0
                 [ -x "${'$'}HOSTAPD" ] || { echo "Missing ${'$'}HOSTAPD"; exit 10; }
                 [ -f "${'$'}CONFIG" ] || { echo "Missing ${'$'}CONFIG"; exit 11; }
-                LIBDIR=/data/data/com.termux/files/usr/lib
-                [ ! -r '$TERMUX_LIBDIR' ] || LIBDIR="${'$'}(cat '$TERMUX_LIBDIR' | tr -d '\r\n')"
-                [ -d "${'$'}LIBDIR" ] || { echo "Missing hostapd runtime libraries: ${'$'}LIBDIR"; exit 16; }
+                LIBDIR_HINT=''
+                [ ! -r "${'$'}TERMUX_LIBDIR" ] || LIBDIR_HINT="${'$'}(cat "${'$'}TERMUX_LIBDIR" | tr -d '\r\n')"
+                LIBDIR=''
+                for CANDIDATE in "${'$'}STAGED_LIBDIR" "${'$'}LIBDIR_HINT" /data/user/0/com.termux/files/usr/lib /data/data/com.termux/files/usr/lib; do
+                    [ -n "${'$'}CANDIDATE" ] || continue
+                    [ -r "${'$'}CANDIDATE/libnl-3.so" ] || continue
+                    [ -r "${'$'}CANDIDATE/libssl.so.3" ] || continue
+                    [ -r "${'$'}CANDIDATE/libcrypto.so.3" ] || continue
+                    LIBDIR="${'$'}CANDIDATE"
+                    break
+                done
+                [ -n "${'$'}LIBDIR" ] || {
+                    echo "Missing hostapd runtime libraries. Stage Termux dependencies in ${'$'}STAGED_LIBDIR"
+                    exit 16
+                }
                 pid_matches() {
                     [ -n "${'$'}1" ] && [ -r "/proc/${'$'}1/cmdline" ] || return 1
                     tr '\000' ' ' < "/proc/${'$'}1/cmdline" 2>/dev/null | grep -F -- "${'$'}CONFIG" >/dev/null
