@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -34,7 +35,10 @@ import be.mygod.vpnhotspot.ui.PreferenceRow
 import java.util.UUID
 
 @Composable
-internal fun EnterpriseUsersRow(mode: EnterpriseSecurityMode) {
+internal fun EnterpriseUsersRow(
+    mode: EnterpriseSecurityMode,
+    onProfileSaved: () -> Unit = {},
+) {
     val initial = remember(mode) {
         runCatching { EnterpriseProfiles.load() }.getOrNull()?.let { stored ->
             stored.copy(mode = mode)
@@ -55,6 +59,7 @@ internal fun EnterpriseUsersRow(mode: EnterpriseSecurityMode) {
         onSave = { updated ->
             EnterpriseProfiles.save(updated)
             profile = updated
+            onProfileSaved()
             editing = false
         },
     )
