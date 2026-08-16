@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="wifi_security_wpa2_enterprise">WPA2-Enterprise</string>
+    <string name="wifi_security_wpa3_enterprise">WPA3-Enterprise</string>
+    <string name="enterprise_users_title">Enterprise users</string>
+    <string name="enterprise_users_summary">%1$d configured, %2$d enabled</string>
+    <string name="enterprise_user_add">Add user</string>
+    <string name="enterprise_user_edit">Edit Enterprise user</string>
+    <string name="enterprise_user_username">Username</string>
+    <string name="enterprise_user_password">Password</string>
+    <string name="enterprise_user_enabled">Enabled</string>
+    <string name="enterprise_user_delete">Delete</string>
+    <string name="enterprise_users_invalid">At least one enabled user with a username and password is required.</string>
+    <string name="enterprise_security_description">PEAP / MSCHAPv2 with multiple local users</string>
+</resources>
