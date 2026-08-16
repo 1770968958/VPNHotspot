@@ -114,6 +114,13 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keep DNS servers alive while tethering services are active" />
         </service>
+        <service
+            android:name=".EnterpriseHotspotService"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Run a custom WPA-Enterprise Wi-Fi access point while VPN sharing is active" />
+        </service>
 
         <service
             android:name=".manage.RepeaterTileService"

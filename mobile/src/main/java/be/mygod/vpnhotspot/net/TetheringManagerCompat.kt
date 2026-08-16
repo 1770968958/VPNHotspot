@@ -21,6 +21,7 @@ import android.os.Parcelable
 import androidx.annotation.Keep
 import androidx.annotation.RequiresApi
 import be.mygod.vpnhotspot.App.Companion.app
+import be.mygod.vpnhotspot.enterprise.EnterpriseTetheringInterceptor
 import be.mygod.vpnhotspot.root.RootManager
 import be.mygod.vpnhotspot.root.TetheringCommands
 import be.mygod.vpnhotspot.util.ConstantLookup
@@ -193,6 +194,7 @@ object TetheringManagerCompat {
      * *@see setStaticIpv4Addresses
      */
     suspend fun startTethering(type: Int, showProvisioningUi: Boolean) {
+        if (EnterpriseTetheringInterceptor.startIfConfigured(type)) return
         if (Build.VERSION.SDK_INT < 30) @Suppress("DEPRECATION") {
             try {
                 startTetheringLegacy(type, showProvisioningUi)
@@ -282,16 +284,19 @@ object TetheringManagerCompat {
         }
         if (suppressed != null) Timber.w(suppressed)
     }
-    suspend fun stopTethering(type: Int) = if (Build.VERSION.SDK_INT >= 30) try {
-        stopTethering(type, app)
-    } catch (e: Failure) {
-        if (e.errorCode != TetheringManager.TETHER_ERROR_NO_CHANGE_TETHERING_PERMISSION) throw e
-        stopTetheringRoot(type)
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: Exception) {
-        stopTetheringRoot(type, e)
-    } else stopTetheringLegacy(type, null)
+    suspend fun stopTethering(type: Int) {
+        if (EnterpriseTetheringInterceptor.stopIfActive(type)) return
+        if (Build.VERSION.SDK_INT >= 30) try {
+            stopTethering(type, app)
+        } catch (e: Failure) {
+            if (e.errorCode != TetheringManager.TETHER_ERROR_NO_CHANGE_TETHERING_PERMISSION) throw e
+            stopTetheringRoot(type)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            stopTetheringRoot(type, e)
+        } else stopTetheringLegacy(type, null)
+    }
     fun stopTetheringLegacy(type: Int) = stopTethering(Services.connectivity, type)
     private suspend fun stopTetheringLegacy(type: Int, suppressed: Exception?) {
         try {
