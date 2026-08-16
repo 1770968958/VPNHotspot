@@ -51,9 +51,9 @@ The device-verified arm64 runtime is shipped as:
 
 `mobile/src/main/assets/enterprise/arm64-v8a/mi9-hostapd-runtime.tar.gz`
 
-`EnterpriseBundledRuntime` extracts only a fixed whitelist of required files and verifies each file against a pinned SHA-256 digest. During the first bundled-runtime validation phase, `EnterpriseBundledRuntimeInstaller` materializes those verified files into the runtime location currently consumed by `EnterpriseApCommands`. Once device validation passes, the remaining legacy/Termux discovery code can be removed without changing UI/profile/routing layers.
+`EnterpriseBundledRuntime` extracts only a fixed whitelist of required files and verifies each file against a pinned SHA-256 digest. `EnterpriseApCommands.InstallRuntime` then copies those verified files into a root-owned executable directory under `/data/local/tmp/vpnhotspot-enterprise` and atomically selects the version through a `current` symlink.
 
-The runtime contains hostapd plus its private libnl/OpenSSL dependencies. No Termux package is required for the bundled runtime path.
+The runtime contains hostapd plus its private libnl/OpenSSL dependencies. No Termux path, Termux installation, `/data/local/tmp/mi9-enterprise` compatibility path, or external runtime discovery is used by the current implementation.
 
 The APK runtime is currently arm64-v8a-specific. This limitation is isolated inside `EnterpriseBundledRuntime`/`EnterpriseHostapdRuntime`; adding another ABI does not require changes to UI/profile/routing code.
 
@@ -64,7 +64,7 @@ The APK runtime is currently arm64-v8a-specific. This limitation is isolated ins
 1. validate AP/profile state;
 2. generate app-owned EAP users, server PKI and hostapd session configuration;
 3. verify/extract the bundled runtime;
-4. materialize the verified runtime for the root-owned hostapd process;
+4. install the verified runtime into the root-owned executable directory;
 5. create `wlan2`, set the owned BSSID, start hostapd and attach Android DHCP/local-network plumbing;
 6. expose `wlan2` to `RoutingManager.LocalOnly` through `EnterpriseHotspotService`.
 

@@ -2,7 +2,6 @@ package be.mygod.vpnhotspot.enterprise
 
 import be.mygod.vpnhotspot.App.Companion.app
 import be.mygod.vpnhotspot.root.EnterpriseApCommands
-import be.mygod.vpnhotspot.root.EnterpriseBundledRuntimeInstaller
 import be.mygod.vpnhotspot.root.RootManager
 import java.io.File
 
@@ -50,7 +49,7 @@ class EnterpriseHostapdRuntime(
         writeAtomic(bssidFile, "$bssid\n")
         val bundled = EnterpriseBundledRuntime.ensureStaged()
         RootManager.use { root ->
-            root.execute(EnterpriseBundledRuntimeInstaller.Install(
+            root.execute(EnterpriseApCommands.InstallRuntime(
                 sourceDirectory = bundled.absolutePath,
                 version = EnterpriseBundledRuntime.VERSION,
             ))

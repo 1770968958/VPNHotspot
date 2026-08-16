@@ -11,8 +11,8 @@ import kotlinx.parcelize.Parcelize
 /**
  * Root-only lifecycle for the custom Enterprise hostapd backend.
  *
- * This deliberately owns only the AP interface, hostapd, DHCP attachment and Android local-network plumbing.
- * VPN routing/NAT/DNS policy stays in VPN Hotspot's existing [be.mygod.vpnhotspot.RoutingManager].
+ * This owns only the AP interface, bundled hostapd runtime, DHCP attachment and Android local-network plumbing.
+ * VPN routing/NAT/DNS policy stays in VPN Hotspot's existing RoutingManager.
  */
 object EnterpriseApCommands {
     const val IFACE = "wlan2"
@@ -21,16 +21,21 @@ object EnterpriseApCommands {
 
     private const val DHCP_START = "192.168.77.20"
     private const val DHCP_END = "192.168.77.200"
-    private const val EXTERNAL_BASE = "/data/local/tmp/mi9-enterprise"
-    private const val HOSTAPD = "$EXTERNAL_BASE/hostapd"
-    private const val STAGED_LIBDIR = "$EXTERNAL_BASE/lib"
-    private const val TERMUX_LIBDIR = "$EXTERNAL_BASE/termux_libdir"
+    private const val RUNTIME_BASE = "/data/local/tmp/vpnhotspot-enterprise"
+    private const val CURRENT_RUNTIME = "$RUNTIME_BASE/current"
+    private const val HOSTAPD = "$CURRENT_RUNTIME/hostapd"
+    private const val LIBDIR = "$CURRENT_RUNTIME/lib"
 
     private val SAFE_PATH = Regex("^/[A-Za-z0-9_./-]+$")
+    private val SAFE_VERSION = Regex("^[A-Za-z0-9._-]{1,80}$")
     private val BSSID = Regex("(?i)^[0-9a-f]{2}(?::[0-9a-f]{2}){5}$")
 
     private fun requirePath(path: String) {
         require(SAFE_PATH.matches(path)) { "Invalid Enterprise runtime path: $path" }
+    }
+
+    private fun requireVersion(version: String) {
+        require(SAFE_VERSION.matches(version)) { "Invalid Enterprise runtime version" }
     }
 
     private fun requireBssid(value: String) {
@@ -47,6 +52,56 @@ object EnterpriseApCommands {
     private suspend fun shell(script: String) {
         val (exit, output) = shellResult(script)
         if (exit != 0) throw RemoteException("Enterprise AP command exited with $exit: $output")
+    }
+
+    /** Installs the APK asset runtime into an executable root-owned directory, then atomically selects it. */
+    @Parcelize
+    data class InstallRuntime(
+        val sourceDirectory: String,
+        val version: String,
+    ) : RootCommandNoResult {
+        override suspend fun execute() = null.also {
+            requirePath(sourceDirectory)
+            requireVersion(version)
+            shell("""
+                set -eu
+                PATH=/system/bin:/system/xbin:/vendor/bin:${'$'}PATH
+                SRC='$sourceDirectory'
+                VERSION='$version'
+                BASE='$RUNTIME_BASE'
+                DST="${'$'}BASE/runtime-${'$'}VERSION"
+                TMP="${'$'}BASE/.runtime-${'$'}VERSION.${'$'}${'$'}"
+                cleanup() { rm -rf "${'$'}TMP"; }
+                trap 'cleanup' EXIT
+                for F in hostapd lib/libcrypto.so.3 lib/libnl-3.so lib/libnl-genl-3.so lib/libssl.so.3; do
+                    [ -r "${'$'}SRC/${'$'}F" ] || { echo "Bundled Enterprise runtime missing ${'$'}F"; exit 20; }
+                done
+                mkdir -p "${'$'}BASE"
+                if [ ! -f "${'$'}DST/.ready" ] || [ "${'$'}(cat "${'$'}DST/.ready" 2>/dev/null || true)" != "${'$'}VERSION" ]; then
+                    rm -rf "${'$'}TMP"
+                    mkdir -p "${'$'}TMP/lib"
+                    cp "${'$'}SRC/hostapd" "${'$'}TMP/hostapd"
+                    cp "${'$'}SRC/lib/libcrypto.so.3" "${'$'}TMP/lib/libcrypto.so.3"
+                    cp "${'$'}SRC/lib/libnl-3.so" "${'$'}TMP/lib/libnl-3.so"
+                    cp "${'$'}SRC/lib/libnl-genl-3.so" "${'$'}TMP/lib/libnl-genl-3.so"
+                    cp "${'$'}SRC/lib/libssl.so.3" "${'$'}TMP/lib/libssl.so.3"
+                    chmod 755 "${'$'}TMP" "${'$'}TMP/lib" "${'$'}TMP/hostapd"
+                    chmod 644 "${'$'}TMP/lib/"*
+                    printf '%s\n' "${'$'}VERSION" > "${'$'}TMP/.ready"
+                    chmod 644 "${'$'}TMP/.ready"
+                    rm -rf "${'$'}DST"
+                    mv "${'$'}TMP" "${'$'}DST"
+                fi
+                ln -sfn "runtime-${'$'}VERSION" "${'$'}BASE/current"
+                [ -x '$HOSTAPD' ] || { echo "Bundled Enterprise hostapd was not installed"; exit 21; }
+                [ -r '$LIBDIR/libnl-3.so' ] && [ -r '$LIBDIR/libnl-genl-3.so' ] && [ -r '$LIBDIR/libssl.so.3' ] && [ -r '$LIBDIR/libcrypto.so.3' ] || {
+                    echo "Bundled Enterprise runtime libraries were not installed"
+                    exit 22
+                }
+                trap - EXIT
+                cleanup
+            """.trimIndent())
+        }
     }
 
     @Parcelize
@@ -69,33 +124,21 @@ object EnterpriseApCommands {
                 IFACE='$IFACE'
                 BSSID='${bssid.lowercase()}'
                 HOSTAPD='$HOSTAPD'
+                LIBDIR='$LIBDIR'
                 CONFIG='$configPath'
                 PID='$pidPath'
                 OWNER='$ownerPath'
                 LOG='$logPath'
                 DHCP_START='$DHCP_START'
                 DHCP_END='$DHCP_END'
-                STAGED_LIBDIR='$STAGED_LIBDIR'
-                TERMUX_LIBDIR='$TERMUX_LIBDIR'
                 BOOT_ID="${'$'}(cat /proc/sys/kernel/random/boot_id)"
                 CREATED_IFACE=0
-                [ -x "${'$'}HOSTAPD" ] || { echo "Missing ${'$'}HOSTAPD"; exit 10; }
-                [ -f "${'$'}CONFIG" ] || { echo "Missing ${'$'}CONFIG"; exit 11; }
-                LIBDIR_HINT=''
-                [ ! -r "${'$'}TERMUX_LIBDIR" ] || LIBDIR_HINT="${'$'}(cat "${'$'}TERMUX_LIBDIR" | tr -d '\r\n')"
-                LIBDIR=''
-                for CANDIDATE in "${'$'}STAGED_LIBDIR" "${'$'}LIBDIR_HINT" /data/user/0/com.termux/files/usr/lib /data/data/com.termux/files/usr/lib; do
-                    [ -n "${'$'}CANDIDATE" ] || continue
-                    [ -r "${'$'}CANDIDATE/libnl-3.so" ] || continue
-                    [ -r "${'$'}CANDIDATE/libssl.so.3" ] || continue
-                    [ -r "${'$'}CANDIDATE/libcrypto.so.3" ] || continue
-                    LIBDIR="${'$'}CANDIDATE"
-                    break
-                done
-                [ -n "${'$'}LIBDIR" ] || {
-                    echo "Missing hostapd runtime libraries. Stage Termux dependencies in ${'$'}STAGED_LIBDIR"
+                [ -x "${'$'}HOSTAPD" ] || { echo "Missing APK-bundled Enterprise hostapd runtime"; exit 10; }
+                [ -r "${'$'}LIBDIR/libnl-3.so" ] && [ -r "${'$'}LIBDIR/libnl-genl-3.so" ] && [ -r "${'$'}LIBDIR/libssl.so.3" ] && [ -r "${'$'}LIBDIR/libcrypto.so.3" ] || {
+                    echo "Missing APK-bundled Enterprise hostapd libraries"
                     exit 16
                 }
+                [ -f "${'$'}CONFIG" ] || { echo "Missing ${'$'}CONFIG"; exit 11; }
                 pid_matches() {
                     [ -n "${'$'}1" ] && [ -r "/proc/${'$'}1/cmdline" ] || return 1
                     tr '\000' ' ' < "/proc/${'$'}1/cmdline" 2>/dev/null | grep -F -- "${'$'}CONFIG" >/dev/null
