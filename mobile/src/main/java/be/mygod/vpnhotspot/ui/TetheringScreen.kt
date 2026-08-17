@@ -71,6 +71,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import be.mygod.vpnhotspot.App.Companion.app
+import be.mygod.vpnhotspot.EnterpriseHotspotService
 import be.mygod.vpnhotspot.LocalOnlyHotspotService
 import be.mygod.vpnhotspot.R
 import be.mygod.vpnhotspot.RepeaterService
@@ -127,6 +128,11 @@ fun TetheringScreen(
     val context = LocalContext.current
     val inspectionMode = LocalInspectionMode.current
     val linkStyles = rememberNetworkAddressLinkStyles()
+    val enterpriseHotspotState by EnterpriseHotspotService.state.collectAsStateWithLifecycle()
+    val enterpriseWifiActive = when (enterpriseHotspotState.phase) {
+        EnterpriseHotspotService.Phase.STARTING, EnterpriseHotspotService.Phase.ACTIVE -> true
+        EnterpriseHotspotService.Phase.IDLE, EnterpriseHotspotService.Phase.STOPPING -> false
+    }
     val staticIpActive by StaticIpSetter.active.collectAsStateWithLifecycle()
     val staticIpAddresses by StaticIpSetter.addresses.collectAsStateWithLifecycle()
     val staticIpApplying by StaticIpSetter.applying.collectAsStateWithLifecycle()
@@ -374,7 +380,7 @@ fun TetheringScreen(
                     TetheringTypeRow(
                         icon = R.drawable.ic_network_wifi,
                         title = R.string.tethering_manage_wifi,
-                        checked = tetheredTypes.contains(TetherType.WIFI),
+                        checked = enterpriseWifiActive || tetheredTypes.contains(TetherType.WIFI),
                         summary = wifiSummary,
                         tetheringType = TetheringManager.TETHERING_WIFI,
                         snackbarHostState = snackbarHostState,

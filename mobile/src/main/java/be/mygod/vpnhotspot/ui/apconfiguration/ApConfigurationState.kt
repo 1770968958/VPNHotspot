@@ -18,6 +18,10 @@ import androidx.compose.runtime.setValue
 import be.mygod.vpnhotspot.App.Companion.app
 import be.mygod.vpnhotspot.R
 import be.mygod.vpnhotspot.RepeaterService
+import be.mygod.vpnhotspot.enterprise.EnterpriseApConfigurationStore
+import be.mygod.vpnhotspot.enterprise.EnterpriseApProfile
+import be.mygod.vpnhotspot.enterprise.EnterpriseProfiles
+import be.mygod.vpnhotspot.enterprise.EnterpriseSecurityMode
 import be.mygod.vpnhotspot.net.wifi.SoftApConfigurationCompat
 import be.mygod.vpnhotspot.net.wifi.VendorData
 import be.mygod.vpnhotspot.net.wifi.VendorElements
@@ -53,7 +57,8 @@ class ApConfigurationState(
         _useFramework = saved.useFramework
         hexSsid = saved.hexSsid
         ssid = saved.ssid
-        securityType = saved.securityType
+        platformSecurityType = saved.securityType
+        enterpriseMode = EnterpriseSecurityMode.fromId(saved.enterpriseModeId)
         password = saved.password
         autoShutdown = saved.autoShutdown
         timeout = saved.timeout
@@ -127,7 +132,8 @@ class ApConfigurationState(
                 add(R.string.wifi_security_wpa3_owe_transition)
                 add(R.string.wifi_security_wpa3_owe)
             }
-        }.mapIndexed { index, label -> SecurityOption(label, index) }
+        }.mapIndexed { index, label -> SecurityOption(label, index) } +
+                if (target == ApConfigurationTarget.System) EnterpriseSecurityAdapter.options else emptyList()
     }
     private val channelOptions get() = currentChannelOptions(p2pMode)
     val bandwidthEntries = if (Build.VERSION.SDK_INT >= 33) {
@@ -149,7 +155,26 @@ class ApConfigurationState(
     }
 
     var ssid by mutableStateOf(displaySsid(initial.ssid))
-    var securityType by mutableIntStateOf(initial.securityType)
+    private var platformSecurityType by mutableIntStateOf(initial.securityType)
+    var enterpriseMode by mutableStateOf(if (target == ApConfigurationTarget.System &&
+            runCatching { EnterpriseApConfigurationStore.load() != null }.getOrDefault(false)) {
+        runCatching { EnterpriseProfiles.load()?.mode }.getOrNull()
+    } else null)
+    /**
+     * Existing AP UI reads/writes securityType directly. Enterprise values are UI-only sentinels and are never
+     * forwarded to Android SoftApConfiguration.
+     */
+    var securityType: Int
+        get() = EnterpriseSecurityAdapter.value(enterpriseMode) ?: selectedPlatformSecurityType
+        set(value) {
+            val mode = EnterpriseSecurityAdapter.mode(value)
+            if (mode == null) {
+                enterpriseMode = null
+                platformSecurityType = value
+            } else {
+                enterpriseMode = mode
+            }
+        }
     var password by mutableStateOf(initial.passphrase.orEmpty())
     var autoShutdown by mutableStateOf(initial.isAutoShutdownEnabled)
     var timeout by mutableStateOf(initial.shutdownTimeoutMillis.let { if (it <= 0) "" else it.toString() })
@@ -184,7 +209,7 @@ class ApConfigurationState(
     var acs6g by mutableStateOf(RangeInput.toString(initial.allowedAcsChannels[SoftApConfiguration.BAND_6GHZ]).orEmpty())
     var maxChannelBandwidth by mutableIntStateOf(normalizeMaxChannelBandwidth(initial.maxChannelBandwidth))
 
-    val canShare get() = try {
+    val canShare get() = enterpriseMode == null && try {
         generateConfig(requirePassword = false, full = false)
         true
     } catch (_: RuntimeException) {
@@ -195,13 +220,14 @@ class ApConfigurationState(
     val vendorDataEditable get() = if (p2pMode) {
         !useFramework && supplicantCapability?.aidlV3 == true
     } else Build.VERSION.SDK_INT >= 35
-    val passwordEnabled get() = when (selectedSecurityType) {
+    val passwordEnabled get() = enterpriseMode != null || when (selectedPlatformSecurityType) {
         SoftApConfiguration.SECURITY_TYPE_OPEN,
         SoftApConfiguration.SECURITY_TYPE_WPA3_OWE_TRANSITION,
         SoftApConfiguration.SECURITY_TYPE_WPA3_OWE -> false
         else -> true
     }
-    val passwordMaxLength get() = selectedSecurityType != SoftApConfiguration.SECURITY_TYPE_WPA3_SAE
+    val passwordMaxLength get() = enterpriseMode == null &&
+            selectedPlatformSecurityType != SoftApConfiguration.SECURITY_TYPE_WPA3_SAE
     val channelError get() = if (!p2pMode && Build.VERSION.SDK_INT >= 30) try {
         SoftApConfigurationCompat.testPlatformValidity(generateChannels())
         null
@@ -214,8 +240,23 @@ class ApConfigurationState(
     } catch (e: Exception) {
         e.readableMessage
     } else null
-    val selectedSecurityType get() =
-        if (p2pMode && !p2pWpa3Supported) SoftApConfiguration.SECURITY_TYPE_WPA2_PSK else securityType
+    private val selectedPlatformSecurityType get() =
+        if (p2pMode && !p2pWpa3Supported) SoftApConfiguration.SECURITY_TYPE_WPA2_PSK else platformSecurityType
+    val selectedSecurityType get() = EnterpriseSecurityAdapter.value(enterpriseMode) ?: selectedPlatformSecurityType
+    val selectedSecurityValue get() = selectedSecurityType
+
+    fun selectSecurity(value: Int) {
+        securityType = value
+    }
+
+    fun enterpriseProfile(): EnterpriseApProfile? = enterpriseMode?.let { mode ->
+        val stored = runCatching { EnterpriseProfiles.load() }.getOrNull()
+        EnterpriseApProfile(
+            mode = mode,
+            users = stored?.users.orEmpty(),
+            serverIdentity = stored?.serverIdentity ?: "vpn-hotspot.local",
+        )
+    }
 
     fun copyError(context: Context) = generateConfigError(context, requirePassword = false, checkChannels = false)
     fun saveError(context: Context) = if (readOnly) null else generateConfigError(
@@ -224,7 +265,8 @@ class ApConfigurationState(
         checkChannels = true,
     )
     fun canSave(context: Context) = !readOnly && saveError(context) == null
-    fun possiblyInvalid(context: Context) = canSave(context) && Build.VERSION.SDK_INT >= 34 && !p2pMode && try {
+    fun possiblyInvalid(context: Context) = enterpriseMode == null && canSave(context) &&
+            Build.VERSION.SDK_INT >= 34 && !p2pMode && try {
         !Services.wifi.validateSoftApConfiguration(generateConfig().toPlatform())
     } catch (e: Exception) {
         Timber.d(e)
@@ -234,6 +276,13 @@ class ApConfigurationState(
     private fun generateConfigError(context: Context, requirePassword: Boolean, checkChannels: Boolean): String? {
         ssidError(ssid, hexSsid, context)?.let { return it }
         if (requirePassword) passwordError(password, context)?.let { return it }
+        enterpriseProfile()?.let { profile ->
+            try {
+                profile.validate()
+            } catch (e: IllegalArgumentException) {
+                return e.readableMessage
+            }
+        }
         validateOptionalLong(timeout) {
             if (!p2pMode && Build.VERSION.SDK_INT >= 30) {
                 SoftApConfigurationCompat.testPlatformTimeoutValidity(it)
@@ -292,14 +341,16 @@ class ApConfigurationState(
     }
 
     fun generateConfig(requirePassword: Boolean = true, full: Boolean = true): SoftApConfigurationCompat {
-        if (requirePassword) passwordError(password)?.let { throw IllegalArgumentException(it) }
+        if (requirePassword && enterpriseMode == null) passwordError(password)?.let { throw IllegalArgumentException(it) }
         val parsedSsid = if (hexSsid) WifiSsidCompat.fromHex(ssid) else WifiSsidCompat.fromUtf8Text(ssid)
         require((parsedSsid?.bytes?.size ?: 0) in 1..32) { app.getString(R.string.wifi_ssid) }
-        return base.copy(
+        val generated = base.copy(
             ssid = parsedSsid,
-            passphrase = password.ifEmpty { null },
+            passphrase = if (enterpriseMode == null) password.ifEmpty { null } else null,
         ).apply {
-            if (!p2pMode || Build.VERSION.SDK_INT >= 36) securityType = selectedSecurityType
+            if (!p2pMode || Build.VERSION.SDK_INT >= 36) securityType = if (enterpriseMode == null) {
+                selectedPlatformSecurityType
+            } else SoftApConfiguration.SECURITY_TYPE_OPEN
             if (!p2pMode) isHiddenSsid = hiddenSsid
             if (!full) return@apply
             isAutoShutdownEnabled = autoShutdown
@@ -331,6 +382,19 @@ class ApConfigurationState(
             maxChannelBandwidth = this@ApConfigurationState.maxChannelBandwidth
             if (Build.VERSION.SDK_INT >= 36) isClientIsolationEnabled = clientIsolation
         }
+        if (target == ApConfigurationTarget.System && requirePassword && full) {
+            val profile = enterpriseProfile()
+            if (profile == null) {
+                EnterpriseApConfigurationStore.clear()
+            } else {
+                profile.validate()
+                EnterpriseProfiles.save(profile)
+                EnterpriseApConfigurationStore.save(generated)
+                // Keep the Android platform Soft AP untouched. Enterprise runtime owns this saved carrier.
+                return base
+            }
+        }
+        return generated
     }
 
     fun copyToClipboard() {
@@ -387,7 +451,8 @@ class ApConfigurationState(
     }
 
     fun passwordError(value: String, context: Context = app): String? {
-        return when (selectedSecurityType) {
+        if (enterpriseMode != null) return null
+        return when (selectedPlatformSecurityType) {
             SoftApConfiguration.SECURITY_TYPE_OPEN,
             SoftApConfiguration.SECURITY_TYPE_WPA3_OWE_TRANSITION,
             SoftApConfiguration.SECURITY_TYPE_WPA3_OWE -> null
@@ -401,8 +466,9 @@ class ApConfigurationState(
 
     private fun load(config: SoftApConfigurationCompat) {
         base = config
+        enterpriseMode = null
         ssid = displaySsid(config.ssid)
-        securityType = config.securityType
+        platformSecurityType = config.securityType
         password = config.passphrase.orEmpty()
         autoShutdown = config.isAutoShutdownEnabled
         timeout = config.shutdownTimeoutMillis.let { if (it <= 0) "" else it.toString() }
@@ -487,7 +553,8 @@ class ApConfigurationState(
         useFramework = useFramework,
         hexSsid = hexSsid,
         ssid = ssid,
-        securityType = securityType,
+        securityType = platformSecurityType,
+        enterpriseModeId = enterpriseMode?.id,
         password = password,
         autoShutdown = autoShutdown,
         timeout = timeout,
@@ -529,6 +596,7 @@ private data class SavedApConfigurationState(
     val hexSsid: Boolean,
     val ssid: String,
     val securityType: Int,
+    val enterpriseModeId: String?,
     val password: String,
     val autoShutdown: Boolean,
     val timeout: String,
