@@ -5,6 +5,8 @@ import android.net.TetheringManager
 import android.os.Build
 import androidx.annotation.RequiresApi
 import be.mygod.vpnhotspot.App.Companion.app
+import be.mygod.vpnhotspot.EnterpriseHotspotService
+import be.mygod.vpnhotspot.root.EnterpriseApCommands
 import be.mygod.vpnhotspot.util.Services
 import be.mygod.vpnhotspot.util.broadcastReceiver
 import be.mygod.vpnhotspot.util.ensureReceiverUnregistered
@@ -23,6 +25,11 @@ import kotlinx.coroutines.launch
 /**
  * Convenience class that reassembles TetherStates from [TetheringManagerCompat.eventFlow], backfilling
  * compat for API 30-.
+ *
+ * The custom Enterprise backend is not owned by Android's public Wi-Fi tethering API, so the framework never reports
+ * its wlan2 interface through TetheringEventCallback. While that backend is starting, active, or stopping, synthesize
+ * its owned downstream into [tethered]. This keeps the existing UI/client state model authoritative without starting
+ * a second platform Soft AP merely to obtain framework state callbacks.
  */
 data class TetherStates(
     val available: PersistentSet<String> = persistentSetOf(),
@@ -60,10 +67,19 @@ data class TetherStates(
          */
         val flow: Flow<TetherStates> = channelFlow {
             var states = TetherStates()
+            var enterprisePhase = EnterpriseHotspotService.state.value.phase
             var dispatchPending = false
+            fun visibleStates(): TetherStates = if (enterprisePhase == EnterpriseHotspotService.Phase.IDLE) {
+                states
+            } else {
+                states.copy(
+                    tethered = states.tethered.add(EnterpriseApCommands.IFACE),
+                    errored = states.errored.removing(EnterpriseApCommands.IFACE),
+                )
+            }
             val dispatch = Runnable {
                 dispatchPending = false
-                trySend(states)
+                trySend(visibleStates())
             }
             fun scheduleDispatch() {
                 if (dispatchPending) return
@@ -83,6 +99,12 @@ data class TetherStates(
                 states = TetherStates(available.toPersistentIfaceSet(), tethered.toPersistentIfaceSet(),
                     localOnly.toPersistentIfaceSet(), nextErrored.build())
                 scheduleDispatch()
+            }
+            launch(Dispatchers.Main.immediate) {
+                EnterpriseHotspotService.state.collect { enterpriseState ->
+                    enterprisePhase = enterpriseState.phase
+                    scheduleDispatch()
+                }
             }
             if (Build.VERSION.SDK_INT < 30) {
                 app.registerReceiver(receiver, IntentFilter(ACTION_TETHER_STATE_CHANGED))
